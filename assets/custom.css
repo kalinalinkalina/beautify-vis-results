@@ -1,0 +1,128 @@
+h1 {
+
+
+body, .dash-application, .dash-table-container, .dash-table, .dash-table-container .dash-spreadsheet-container {
+    font-family: system-ui, Arial, 'Liberation Sans', sans-serif;
+    background: #f4f6fb;
+    color: #23272f;
+    margin: 0;
+    padding: 0;
+}
+
+
+    font-family: system-ui, Arial, 'Liberation Sans', sans-serif;
+    font-size: 2.8rem;
+    font-weight: 700;
+        font-size: 1.7rem;
+        font-weight: 500;
+        letter-spacing: 0.01em;
+        color: #2a2a2a;
+        margin-top: 18px;
+        margin-bottom: 18px;
+        text-shadow: none;
+.dash-dropdown, .Select-control, .Select {
+    font-size: 1.13rem;
+    border-radius: 12px !important;
+    border: 1.5px solid #e0e4ed !important;
+        font-size: 1rem;
+        font-weight: 400;
+        border-radius: 8px !important;
+        border: 1.2px solid #e0e4ed !important;
+        background: #fff !important;
+        box-shadow: 0 2px 8px rgba(80,80,120,0.04);
+        transition: border-color 0.2s, box-shadow 0.2s;
+        min-height: 36px;
+        padding: 0 6px;
+        margin-left: 10px;
+.dash-dropdown:focus, .Select-control:focus, .Select:focus {
+    border-color: #6c63ff !important;
+    box-shadow: 0 0 0 2px #e0e7ff !important;
+    outline: none !important;
+        font-size: 1rem;
+        font-weight: 400;
+        color: #3a3a4a;
+        margin-bottom: 0;
+        margin-right: 4px;
+        display: inline-block;
+        letter-spacing: 0.01em;
+        vertical-align: middle;
+    color: #3a3a4a;
+    margin-bottom: 8px;
+    display: block;
+    letter-spacing: 0.01em;
+}
+
+#plots-container {
+    background: #fff;
+    border-radius: 22px;
+    box-shadow: 0 8px 32px rgba(80, 80, 120, 0.13);
+    padding: 40px 32px 32px 32px;
+    margin-top: 32px;
+    #\31  > div {
+        display: flex;
+        flex-direction: row;
+        gap: 18px;
+        justify-content: center;
+        align-items: flex-start;
+        margin-bottom: 12px;
+        margin-top: 0;
+    flex-direction: row;
+    gap: 28px;
+    #\31  > div > div {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        flex: 1 1 180px;
+        min-width: 160px;
+        max-width: 260px;
+        margin-bottom: 0;
+    justify-content: center;
+    align-items: flex-end;
+    margin-bottom: 32px;
+}
+
+#\31  > div > div {
+    flex: 1 1 220px;
+    min-width: 220px;
+    max-width: 340px;
+}
+
+/* Graph tweaks */
+.js-plotly-plot .main-svg {
+    font-family: system-ui, Arial, 'Liberation Sans', sans-serif !important;
+}
+
+/* Responsive tweaks */
+@media (max-width: 900px) {
+    #plots-container {
+        padding: 16px 4px;
+    }
+    #\31  > div {
+        flex-direction: column;
+        gap: 12px;
+    }
+    .dash-dropdown, .Select-control, .Select {
+        font-size: 1rem;
+    }
+}
+
+/* Subtle hover for dropdowns */
+.dash-dropdown:hover, .Select-control:hover, .Select:hover {
+    border-color: #b3b8f7 !important;
+    box-shadow: 0 2px 16px rgba(108,99,255,0.07);
+}
+
+/* Remove ugly blue highlight on click */
+.dash-dropdown:active, .Select-control:active, .Select:active {
+    outline: none !important;
+}
+
+/* Hide scrollbars for a cleaner look */
+::-webkit-scrollbar {
+    width: 8px;
+    background: #f4f6fb;
+}
+::-webkit-scrollbar-thumb {
+    background: #e0e4ed;
+    border-radius: 8px;
+}
