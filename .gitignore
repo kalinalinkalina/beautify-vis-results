@@ -31,3 +31,4 @@ Thumbs.db
 *.log
 nohup.out
 data/data-4-13-26.csv
+api.gs

@@ -1,3 +1,109 @@
+# --- Centralized group/legend info function for dashboard visualizations ---
+def get_group_legend_info(comparison_type):
+    """
+    Returns legend_labels, legend_colors, legend_order for a given comparison_type.
+    """
+    group_orders = {
+        "experience": [
+            "Less than 1 year", "1-3 years", "3-5 years", "5-10 years", "10-20 years", "More than 20 years"
+        ],
+        "frequency_vis": [
+            "Less than once a year", "Annually", "Monthly", "Weekly", "Daily"
+        ],
+        "frequency_public": [
+            "Never", "Rarely", "Occasionally", "Frequently", "This is a primary part of my work"
+        ],
+        "age": ["18-24", "25-34", "35-44", "45-54", "55-64", "65+"],
+        "tool_use": ["Yes", "No", "Maybe"]
+    }
+    viridis_r_6 = [
+        "#5ec962", "#3fbc73", "#21918c", "#31688e", "#443983", "#440154"
+    ]
+    viridis_r_5 = [
+        "#5ec962", "#27ad81", "#21918c", "#3b528b", "#440154"
+    ]
+    # Role
+    if comparison_type == "role":
+        legend_labels = {
+            "Creating visualizations is the primary role I perform in my work": "Viz Practitioner",
+            "I work with visualizations created by others, but I do not create or research visualization myself": "Scientist who uses vis",
+            "Researching visualization methods/techniques is my primary role": "Vis Researcher",
+            "I create visualizations to help me in my primary role, which is not visualization-related": "Scientist who creates vis"
+        }
+        legend_colors = {
+            "Vis Researcher": 'red',
+            "Viz Practitioner": 'orange',
+            "Scientist who creates vis": 'blue',
+            "Scientist who uses vis": 'green'
+        }
+        legend_order = ["Vis Researcher", "Viz Practitioner", "Scientist who creates vis", "Scientist who uses vis"]
+        return legend_labels, legend_colors, legend_order
+    # Experience
+    if comparison_type == "experience":
+        legend_labels = None
+        legend_colors = dict(zip(group_orders["experience"], viridis_r_6))
+        legend_order = group_orders["experience"]
+        return legend_labels, legend_colors, legend_order
+    # Frequency of Visualization
+    if comparison_type == "frequency_vis":
+        legend_labels = None
+        legend_colors = dict(zip(group_orders["frequency_vis"], viridis_r_5))
+        legend_order = group_orders["frequency_vis"]
+        return legend_labels, legend_colors, legend_order
+    # Frequency of Public Visualization
+    if comparison_type == "frequency_public":
+        legend_labels = None
+        legend_colors = dict(zip(group_orders["frequency_public"], viridis_r_5))
+        legend_colors["Never"] = "#e07b7b"  # desaturated red
+        legend_order = group_orders["frequency_public"]
+        return legend_labels, legend_colors, legend_order
+    # Age
+    if comparison_type == "age":
+        legend_labels = None
+        legend_colors = dict(zip(group_orders["age"], viridis_r_6))
+        legend_order = group_orders["age"]
+        return legend_labels, legend_colors, legend_order
+    # Tool use
+    if comparison_type == "tool_use":
+        legend_labels = None
+        legend_colors = {"Yes": "#5ec962", "No": "#440154", "Maybe": "#21918c"}
+        legend_order = group_orders["tool_use"]
+        return legend_labels, legend_colors, legend_order
+    # Domain (dynamic)
+    if comparison_type == "domain":
+        # Colors and order will be set dynamically in dashboard.py
+        return None, None, None
+    # Default
+    return None, None, None
+# --- Centralized feature sorting function for dashboard visualizations ---
+def get_feature_sort_order(sort_by, df_human_melted, df_ai_melted):
+    """
+    Returns the feature order (Index) for sorting, given a sort type and melted DataFrames.
+    Args:
+        sort_by: str, one of 'human_mean', 'ai_mean', 'difference', 'human_median', 'ai_median', 'difference_median'
+        df_human_melted: DataFrame with columns Feature_Name, Numerical_Score
+        df_ai_melted: DataFrame with columns Feature_Name, Numerical_Score
+    Returns:
+        Index of feature names in the desired order
+    """
+    if sort_by == "human_mean":
+        return df_human_melted.groupby('Feature_Name')['Numerical_Score'].mean().sort_values(ascending=False).index
+    elif sort_by == "ai_mean":
+        return df_ai_melted.groupby('Feature_Name')['Numerical_Score'].mean().sort_values(ascending=False).index
+    elif sort_by == "difference":
+        human_means = df_human_melted.groupby('Feature_Name')['Numerical_Score'].mean()
+        return (human_means - ai_means).sort_values(ascending=False).index
+    elif sort_by == "human_median":
+        return df_human_melted.groupby('Feature_Name')['Numerical_Score'].median().sort_values(ascending=False).index
+    elif sort_by == "ai_median":
+        return df_ai_melted.groupby('Feature_Name')['Numerical_Score'].median().sort_values(ascending=False).index
+    elif sort_by == "difference_median":
+        human_medians = df_human_melted.groupby('Feature_Name')['Numerical_Score'].median()
+        ai_medians = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].median()
+        return (human_medians - ai_medians).sort_values(ascending=False).index
+    else:
+        # Default to human_mean
+        return df_human_melted.groupby('Feature_Name')['Numerical_Score'].mean().sort_values(ascending=False).index
 import pandas as pd
 
 def clean_teapot_data(file_path):
@@ -83,6 +189,37 @@ def clean_teapot_data(file_path):
     print(f"Number of rows after cleaning: {df.shape[0]}")
 
     return df
+
+
+# --- Centralized melt and map function for dashboard visualizations ---
+def melt_and_map_acceptability(
+    df,
+    acceptability_cols,
+    likert_mapping,
+    feature_prefix,
+    group_col=None
+):
+    """
+    Melts acceptability columns, maps Likert to numerical, and renames features.
+    Optionally keeps a group column for comparison types.
+    Args:
+        df: DataFrame
+        acceptability_cols: list of columns to melt
+        likert_mapping: dict mapping Likert to int
+        feature_prefix: str, e.g. 'Acceptability_Human_' or 'Acceptability_AI_'
+        group_col: str or None, column to keep as id_var
+    Returns:
+        Melted DataFrame with columns: [group_col (if given), Feature, Acceptability_Score, Numerical_Score, Feature_Name]
+    """
+    id_vars = [group_col] if group_col else None
+    melted = df.melt(
+        id_vars=id_vars,
+        value_vars=acceptability_cols,
+        var_name='Feature', value_name='Acceptability_Score'
+    )
+    melted['Numerical_Score'] = melted['Acceptability_Score'].map(likert_mapping)
+    melted['Feature_Name'] = melted['Feature'].str.replace(feature_prefix, '', regex=False)
+    return melted
 
 # Example usage
 if __name__ == "__main__":

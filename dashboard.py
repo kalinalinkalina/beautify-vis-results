@@ -1,6 +1,7 @@
 import dash
 from dash import dcc, html, Input, Output
 import pandas as pd
+from data_cleaning import melt_and_map_acceptability, get_feature_sort_order, get_group_legend_info
 import plotly.express as px
 from data_cleaning import clean_teapot_data
 import time
@@ -31,22 +32,25 @@ likert_mapping = {
     "Often acceptable": 3, "Usually acceptable": 4, "Always acceptable": 5
 }
 
-# Prepare data for visualization
-df_human_melted = df[human_acceptability_cols].melt(var_name='Feature', value_name='Acceptability_Score')
-df_human_melted['Numerical_Score'] = df_human_melted['Acceptability_Score'].map(likert_mapping)
-df_human_melted['Feature_Name'] = df_human_melted['Feature'].str.replace('Acceptability_Human_', '', regex=False)
 
+
+# Centralized melting and mapping for Human and AI
+df_human_melted = melt_and_map_acceptability(
+    df,
+    human_acceptability_cols,
+    likert_mapping,
+    feature_prefix='Acceptability_Human_'
+)
+df_ai_melted = melt_and_map_acceptability(
+    df,
+    ai_acceptability_cols,
+    likert_mapping,
+    feature_prefix='Acceptability_AI_'
+)
 
 human_mean_order = df_human_melted.groupby('Feature_Name')['Numerical_Score'].mean().sort_values(ascending=False).index
 df_human_melted['Feature_Name'] = pd.Categorical(df_human_melted['Feature_Name'], categories=human_mean_order, ordered=True)
-
-df_ai_melted = df[ai_acceptability_cols].melt(var_name='Feature', value_name='Acceptability_Score')
-df_ai_melted['Numerical_Score'] = df_ai_melted['Acceptability_Score'].map(likert_mapping)
-df_ai_melted['Feature_Name'] = df_ai_melted['Feature'].str.replace('Acceptability_AI_', '', regex=False)
-
-
 df_ai_melted['Feature_Name'] = pd.Categorical(df_ai_melted['Feature_Name'], categories=human_mean_order, ordered=True)
-
 df_human_melted['Type'] = 'Human'
 df_ai_melted['Type'] = 'AI'
 df_combined_melted = pd.concat([df_human_melted, df_ai_melted], ignore_index=True)
@@ -171,40 +175,12 @@ app.layout = html.Div([
     [Input("chart-type", "value"), Input("comparison-type", "value"), Input("sort-by", "value")]
 )
 def update_plot(chart_type, comparison_type, sort_by):
-    # Legend definitions for role-based plots (always needed for line chart logic)
-    legend_labels = {
-        "Creating visualizations is the primary role I perform in my work": "Viz Practitioner",
-        "I work with visualizations created by others, but I do not create or research visualization myself": "Scientist who uses vis",
-        "Researching visualization methods/techniques is my primary role": "Vis Researcher",
-        "I create visualizations to help me in my primary role, which is not visualization-related": "Scientist who creates vis"
-    }
-    legend_colors = {
-        "Vis Researcher": 'red',
-        "Viz Practitioner": 'orange',
-        "Scientist who creates vis": 'blue',
-        "Scientist who uses vis": 'green'
-    }
-    legend_order = ["Vis Researcher", "Viz Practitioner", "Scientist who creates vis", "Scientist who uses vis"]
+    # Centralized legend/group info
+    legend_labels, legend_colors, legend_order = get_group_legend_info(comparison_type)
+
     if not sort_by:
         sort_by = "human_mean"  # Default value
-
-    # Determine the sorting order based on the 'Sort by' dropdown
-    if sort_by == "human_mean":
-        sort_order = df_human_melted.groupby('Feature_Name')['Numerical_Score'].mean().sort_values(ascending=False).index
-    elif sort_by == "ai_mean":
-        sort_order = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].mean().sort_values(ascending=False).index
-    elif sort_by == "difference":
-        human_means = df_human_melted.groupby('Feature_Name')['Numerical_Score'].mean()
-        ai_means = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].mean()
-        sort_order = (human_means - ai_means).sort_values(ascending=False).index
-    elif sort_by == "human_median":
-        sort_order = df_human_melted.groupby('Feature_Name')['Numerical_Score'].median().sort_values(ascending=False).index
-    elif sort_by == "ai_median":
-        sort_order = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].median().sort_values(ascending=False).index
-    elif sort_by == "difference_median":
-        human_medians = df_human_melted.groupby('Feature_Name')['Numerical_Score'].median()
-        ai_medians = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].median()
-        sort_order = (human_medians - ai_medians).sort_values(ascending=False).index
+    sort_order = get_feature_sort_order(sort_by, df_human_melted, df_ai_melted)
 
     # Update the categorical order for sorting
     df_combined_melted['Feature_Name'] = pd.Categorical(
