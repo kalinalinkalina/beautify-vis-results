@@ -62,7 +62,7 @@ app.layout = html.Div([
             id="chart-type",
             options=[
                 {"label": "Box Plot", "value": "box"},
-                {"label": "Histogram", "value": "histogram"},
+                {"label": "Line Chart of Means", "value": "line"},
                 {"label": "Slope Chart", "value": "slope"}
             ],
             value="box"
@@ -73,8 +73,12 @@ app.layout = html.Div([
             options=[
                 {"label": "Human vs AI", "value": "human_ai"},
                 {"label": "Role", "value": "role"},
-                {"label": "Experience", "value": "experience"},
-                {"label": "Frequency", "value": "frequency"}
+                {"label": "Years of Vis Experience", "value": "experience"},
+                {"label": "Frequency of Visualization", "value": "frequency_vis"},
+                {"label": "Frequency of Vis for Public Communication", "value": "frequency_public"},
+                {"label": "Domain", "value": "domain"},
+                {"label": "Age", "value": "age"},
+                {"label": "Would use an AI tool for beautification", "value": "tool_use"},
             ],
             value="human_ai"
         ),
@@ -85,8 +89,10 @@ app.layout = html.Div([
             options=[
                 {"label": "Human Mean", "value": "human_mean"},
                 {"label": "AI Mean", "value": "ai_mean"},
-                {"label": "Difference (Human - AI)", "value": "difference"},
-                {"label": "Combined Mean", "value": "combined_mean"}
+                {"label": "Difference in Mean (Human - AI)", "value": "difference"},
+                {"label": "Human Median", "value": "human_median"},
+                {"label": "AI Median", "value": "ai_median"},
+                {"label": "Difference in Median (Human - AI)", "value": "difference_median"}
             ],
             value="human_mean"
         ),
@@ -103,6 +109,20 @@ app.layout = html.Div([
     [Input("chart-type", "value"), Input("comparison-type", "value"), Input("sort-by", "value")]
 )
 def update_plot(chart_type, comparison_type, sort_by):
+    # Legend definitions for role-based plots (always needed for line chart logic)
+    legend_labels = {
+        "Creating visualizations is the primary role I perform in my work": "Viz Practitioner",
+        "I work with visualizations created by others, but I do not create or research visualization myself": "Scientist who uses vis",
+        "Researching visualization methods/techniques is my primary role": "Vis Researcher",
+        "I create visualizations to help me in my primary role, which is not visualization-related": "Scientist who creates vis"
+    }
+    legend_colors = {
+        "Vis Researcher": 'red',
+        "Viz Practitioner": 'orange',
+        "Scientist who creates vis": 'blue',
+        "Scientist who uses vis": 'green'
+    }
+    legend_order = ["Vis Researcher", "Viz Practitioner", "Scientist who creates vis", "Scientist who uses vis"]
     if not sort_by:
         sort_by = "human_mean"  # Default value
 
@@ -115,8 +135,14 @@ def update_plot(chart_type, comparison_type, sort_by):
         human_means = df_human_melted.groupby('Feature_Name')['Numerical_Score'].mean()
         ai_means = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].mean()
         sort_order = (human_means - ai_means).sort_values(ascending=False).index
-    elif sort_by == "combined_mean":
-        sort_order = df_combined_melted.groupby('Feature_Name')['Numerical_Score'].mean().sort_values(ascending=False).index
+    elif sort_by == "human_median":
+        sort_order = df_human_melted.groupby('Feature_Name')['Numerical_Score'].median().sort_values(ascending=False).index
+    elif sort_by == "ai_median":
+        sort_order = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].median().sort_values(ascending=False).index
+    elif sort_by == "difference_median":
+        human_medians = df_human_melted.groupby('Feature_Name')['Numerical_Score'].median()
+        ai_medians = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].median()
+        sort_order = (human_medians - ai_medians).sort_values(ascending=False).index
 
     # Update the categorical order for sorting
     df_combined_melted['Feature_Name'] = pd.Categorical(
@@ -126,29 +152,342 @@ def update_plot(chart_type, comparison_type, sort_by):
     # Re-sort the DataFrame based on the updated categorical order
     sorted_data = df_combined_melted.sort_values(by=["Feature_Name", "Type", "Numerical_Score"])
 
+
+    # --- Early return for human_ai chart types to avoid KeyError ---
     if comparison_type == "human_ai":
-        fig_human_ai = px.box(
-            sorted_data, x="Feature_Name", y="Numerical_Score", color="Type",
-            color_discrete_map={"Human": "peru", "AI": "gray"},
-            title="Acceptability of Human vs AI Alterations",
-            category_orders={"Feature_Name": list(sort_order), "Type": ["Human", "AI"]}  # Ensure Human appears first
-        )
-        fig_human_ai.update_layout(
-            xaxis_title="Alteration",
-            yaxis_title="Acceptability",
-            yaxis=dict(
-                tickmode="array",
-                tickvals=[0, 1, 2, 3, 4, 5],
-                ticktext=["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"]
+        if chart_type == "box":
+            fig_human_ai = px.box(
+                sorted_data, x="Feature_Name", y="Numerical_Score", color="Type",
+                color_discrete_map={"Human": "peru", "AI": "gray"},
+                title="Acceptability of Human vs AI Alterations",
+                category_orders={"Feature_Name": list(sort_order), "Type": ["Human", "AI"]}
             )
-        )
-        return fig_human_ai, None
+            fig_human_ai.update_layout(
+                xaxis_title="Alteration",
+                yaxis_title="Acceptability",
+                yaxis=dict(
+                    tickmode="array",
+                    tickvals=[0, 1, 2, 3, 4, 5],
+                    ticktext=["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"]
+                )
+            )
+            return fig_human_ai, None
+        elif chart_type == "line":
+            import plotly.graph_objects as go
+            feature_order = list(sort_order)
+            # Calculate means for each feature for Human and AI
+            human_means = df_human_melted.groupby('Feature_Name')['Numerical_Score'].mean().reindex(feature_order)
+            ai_means = df_ai_melted.groupby('Feature_Name')['Numerical_Score'].mean().reindex(feature_order)
+            fig = go.Figure()
+            # Human: filled brown circle
+            fig.add_trace(go.Scatter(
+                x=feature_order,
+                y=human_means,
+                mode="lines+markers",
+                name="Human",
+                marker=dict(symbol="circle", color="peru", size=8, line=dict(width=0)),
+                line=dict(color="peru", width=2)
+            ))
+            # AI: outlined gray circle
+            fig.add_trace(go.Scatter(
+                x=feature_order,
+                y=ai_means,
+                mode="lines+markers",
+                name="AI",
+                marker=dict(symbol="circle-open", color="gray", size=8, line=dict(width=2, color="gray")),
+                line=dict(color="gray", width=2)
+            ))
+            fig.update_layout(
+                title="Mean Acceptability Scores by Feature (Human vs AI)",
+                xaxis_title="Feature",
+                yaxis_title="Mean Acceptability Score (0-5 scale)",
+                xaxis=dict(tickmode="array", tickvals=feature_order, tickangle=0),
+                yaxis=dict(
+                    tickmode="array",
+                    tickvals=[0,1,2,3,4,5],
+                    ticktext=["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
+                    range=[-0.5, 5.5]
+                ),
+                legend_title="Type",
+                height=500,
+                margin=dict(r=180),
+            )
+            return fig, None
+        # For now, just return None for the second plot if not box or line
+        return None, None
+
 
     # Map comparison types to the correct column names
     comparison_column_map = {
         "role": "Vis_Role",
-        "experience": "Experience",
-        "frequency": "Frequency"
+        "experience": "Vis_Length",
+        "frequency_vis": "Vis_Frequency",
+        "frequency_public": "Public_Frequency",
+        "domain": "Domains",
+        "age": "Age",
+        "tool_use": "Tool_use"
+    }
+
+    comparison_column = comparison_column_map.get(comparison_type, comparison_type.capitalize())
+
+    if comparison_type == "human_ai":
+        if chart_type == "box":
+            fig_human_ai = px.box(
+                sorted_data, x="Feature_Name", y="Numerical_Score", color="Type",
+                color_discrete_map={"Human": "peru", "AI": "gray"},
+                title="Acceptability of Human vs AI Alterations",
+                category_orders={"Feature_Name": list(sort_order), "Type": ["Human", "AI"]}
+            )
+            fig_human_ai.update_layout(
+                xaxis_title="Alteration",
+                yaxis_title="Acceptability",
+                yaxis=dict(
+                    tickmode="array",
+                    tickvals=[0, 1, 2, 3, 4, 5],
+                    ticktext=["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"]
+                )
+            )
+            return fig_human_ai, None
+        # You can add a line chart for human_ai here if needed in the future
+        # For now, just return None for the second plot
+        return None, None
+
+    if comparison_column not in df.columns:
+        raise KeyError(f"The column '{comparison_column}' is not present in the DataFrame.")
+
+
+    # Ensure the 'Feature' column is created and used consistently
+    # Melt the data for Human and AI acceptability scores
+    human_data = df.melt(
+        id_vars=[comparison_column],
+        value_vars=human_acceptability_cols,
+        var_name="Feature", value_name="Acceptability_Score"
+    )
+    ai_data = df.melt(
+        id_vars=[comparison_column],
+        value_vars=ai_acceptability_cols,
+        var_name="Feature", value_name="Acceptability_Score"
+    )
+    # Map Acceptability_Score to numerical values for correct plotting (needed for line chart means)
+    human_data["Numerical_Score"] = human_data["Acceptability_Score"].map(likert_mapping)
+    ai_data["Numerical_Score"] = ai_data["Acceptability_Score"].map(likert_mapping)
+
+    # --- Line Chart of Means for all comparison types except human_ai ---
+    if chart_type == "line":
+        import plotly.graph_objects as go
+        feature_order = list(sort_order)
+        if comparison_type == "role":
+            # ...existing code for role (untouched)...
+            vis_role_categories = {
+                "Creating visualizations is the primary role I perform in my work": "Viz Practitioner",
+                "I work with visualizations created by others, but I do not create or research visualization myself": "Scientist who uses vis",
+                "Researching visualization methods/techniques is my primary role": "Vis Researcher",
+                "I create visualizations to help me in my primary role, which is not visualization-related": "Scientist who creates vis"
+            }
+            all_role_mean_scores = []
+            for full_role_name, display_role_name in vis_role_categories.items():
+                df_role = df[df['Vis_Role'] == full_role_name].copy()
+                if not df_role.empty:
+                    for i in range(len(human_acceptability_cols)):
+                        human_col_name = human_acceptability_cols[i]
+                        ai_col_name = ai_acceptability_cols[i]
+                        feature_name = human_col_name.split('_')[-1]
+                        temp_df_role_feature = df_role[[human_col_name, ai_col_name]].dropna().copy()
+                        temp_df_role_feature['Human_Score'] = temp_df_role_feature[human_col_name].map(likert_mapping)
+                        temp_df_role_feature['AI_Score'] = temp_df_role_feature[ai_col_name].map(likert_mapping)
+                        temp_df_role_feature.dropna(subset=['Human_Score', 'AI_Score'], inplace=True)
+                        if not temp_df_role_feature.empty:
+                            mean_human = temp_df_role_feature['Human_Score'].mean()
+                            mean_ai = temp_df_role_feature['AI_Score'].mean()
+                            all_role_mean_scores.append({
+                                'Feature': feature_name,
+                                'Role': display_role_name,
+                                'Type': 'Human',
+                                'Mean_Score': mean_human
+                            })
+                            all_role_mean_scores.append({
+                                'Feature': feature_name,
+                                'Role': display_role_name,
+                                'Type': 'AI',
+                                'Mean_Score': mean_ai
+                            })
+            df_roles_means = pd.DataFrame(all_role_mean_scores)
+            role_markers = {
+                "Vis Researcher": "circle",
+                "Viz Practitioner": "circle",
+                "Scientist who creates vis": "square",
+                "Scientist who uses vis": "square"
+            }
+            fig_human = go.Figure()
+            for role in legend_order:
+                role_data = df_roles_means[(df_roles_means['Role'] == role) & (df_roles_means['Type'] == 'Human')]
+                y_vals = [role_data[role_data['Feature'] == f]['Mean_Score'].iloc[0] if not role_data[role_data['Feature'] == f].empty else None for f in feature_order]
+                fig_human.add_trace(go.Scatter(
+                    x=feature_order,
+                    y=y_vals,
+                    mode="lines+markers",
+                    name=role,
+                    marker=dict(symbol=role_markers[role], color=legend_colors[role], size=8),
+                    line=dict(color=legend_colors[role], width=2)
+                ))
+            fig_human.update_layout(
+                title="Mean Human Acceptability Scores by Feature and Visualization Role",
+                xaxis_title="Feature",
+                yaxis_title="Mean Acceptability Score (0-5 scale)",
+                xaxis=dict(tickmode="array", tickvals=feature_order, tickangle=0),
+                yaxis=dict(
+                    tickmode="array",
+                    tickvals=[0,1,2,3,4,5],
+                    ticktext=["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
+                    range=[-0.5, 5.5]
+                ),
+                legend_title="Visualization Role",
+                height=500,
+                margin=dict(r=180),
+            )
+            fig_ai = go.Figure()
+            for role in legend_order:
+                role_data = df_roles_means[(df_roles_means['Role'] == role) & (df_roles_means['Type'] == 'AI')]
+                y_vals = [role_data[role_data['Feature'] == f]['Mean_Score'].iloc[0] if not role_data[role_data['Feature'] == f].empty else None for f in feature_order]
+                fig_ai.add_trace(go.Scatter(
+                    x=feature_order,
+                    y=y_vals,
+                    mode="lines+markers",
+                    name=role,
+                    marker=dict(symbol=role_markers[role]+"-open", color=legend_colors[role], size=8, line=dict(width=2)),
+                    line=dict(color=legend_colors[role], width=2)
+                ))
+            fig_ai.update_layout(
+                title="Mean AI Acceptability Scores by Feature and Visualization Role",
+                xaxis_title="Feature",
+                yaxis_title="Mean Acceptability Score (0-5 scale)",
+                xaxis=dict(tickmode="array", tickvals=feature_order, tickangle=0),
+                yaxis=dict(
+                    tickmode="array",
+                    tickvals=[0,1,2,3,4,5],
+                    ticktext=["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
+                    range=[-0.5, 5.5]
+                ),
+                legend_title="Visualization Role",
+                height=500,
+                margin=dict(r=180),
+            )
+            return fig_human, fig_ai
+        else:
+            # For all other comparison types (except human_ai), robustly handle group-feature combos and types
+            group_col = comparison_column
+            # Define group orders for each comparison type (match notebook)
+            group_orders = {
+                "experience": [
+                    "Less than 1 year",
+                    "1-3 years",
+                    "3-5 years",
+                    "5-10 years",
+                    "10-20 years",
+                    "More than 20 years"
+                ],
+                "frequency_vis": ["Daily", "Weekly", "Monthly", "Annually", "Less than once a year"],
+                "frequency_public": ["This is a primary part of my work", "Frequently", "Occasionally", "Rarely", "Never"],
+                # Add more as needed for domain, age, tool_use
+            }
+            legend_colors = {
+                "0-2 years": 'purple',
+                "3-5 years": 'blue',
+                "6-10 years": 'green',
+                "11-20 years": 'orange',
+                "21+ years": 'red',
+                "Never": 'gray',
+                "Rarely": 'blue',
+                "Sometimes": 'green',
+                "Often": 'orange',
+                "Always": 'red',
+            }
+            # No mapping needed; group names now match CSV exactly
+            # Get group order for this comparison type
+            group_order = group_orders.get(comparison_type, None)
+            if group_order is not None:
+                group_values = [g for g in group_order if g in human_data[group_col].unique()]
+            else:
+                group_values = [g for g in human_data[group_col].dropna().unique()]
+            # Ensure feature names match feature_order for all non-role types
+            feature_rename_map = {
+                **{col: col.replace("Acceptability_Human_", "") for col in human_acceptability_cols},
+                **{col: col.replace("Acceptability_AI_", "") for col in ai_acceptability_cols}
+            }
+            human_data["Feature"] = human_data["Feature"].replace(feature_rename_map)
+            ai_data["Feature"] = ai_data["Feature"].replace(feature_rename_map)
+            human_data["Feature"] = pd.Categorical(human_data["Feature"], categories=feature_order, ordered=True)
+            ai_data["Feature"] = pd.Categorical(ai_data["Feature"], categories=feature_order, ordered=True)
+
+            fig_human = go.Figure()
+            for group in group_values:
+                group_df = human_data[human_data[group_col] == group]
+                if group_df.empty:
+                    continue
+                means = group_df.groupby("Feature")["Numerical_Score"].mean().reindex(feature_order)
+                fig_human.add_trace(go.Scatter(
+                    x=feature_order,
+                    y=means,
+                    mode='lines+markers',
+                    name=str(group),
+                    line=dict(color=legend_colors.get(group, None), width=2),
+                    marker=dict(size=8)
+                ))
+            fig_human.update_layout(
+                title=f"Mean Human Acceptability Scores by Feature and {group_col}",
+                xaxis_title="Feature",
+                yaxis_title="Mean Acceptability Score (0-5 scale)",
+                xaxis=dict(tickmode="array", tickvals=feature_order, tickangle=0),
+                yaxis=dict(
+                    tickmode="array",
+                    tickvals=[0,1,2,3,4,5],
+                    ticktext=["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
+                    range=[-0.5, 5.5]
+                ),
+                legend_title=group_col,
+                height=500,
+                margin=dict(r=180),
+            )
+            fig_ai = go.Figure()
+            for group in group_values:
+                group_df = ai_data[ai_data[group_col] == group]
+                if group_df.empty:
+                    continue
+                means = group_df.groupby("Feature")["Numerical_Score"].mean().reindex(feature_order)
+                fig_ai.add_trace(go.Scatter(
+                    x=feature_order,
+                    y=means,
+                    mode='lines+markers',
+                    name=str(group),
+                    line=dict(color=legend_colors.get(group, None), width=2),
+                    marker=dict(size=8, symbol="circle-open")
+                ))
+            fig_ai.update_layout(
+                title=f"Mean AI Acceptability Scores by Feature and {group_col}",
+                xaxis_title="Feature",
+                yaxis_title="Mean Acceptability Score (0-5 scale)",
+                xaxis=dict(tickmode="array", tickvals=feature_order, tickangle=0),
+                yaxis=dict(
+                    tickmode="array",
+                    tickvals=[0,1,2,3,4,5],
+                    ticktext=["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
+                    range=[-0.5, 5.5]
+                ),
+                legend_title=group_col,
+                height=500,
+                margin=dict(r=180),
+            )
+            return fig_human, fig_ai
+
+    # Map comparison types to the correct column names
+    comparison_column_map = {
+        "role": "Vis_Role",
+        "experience": "Vis_Length",
+        "frequency_vis": "Vis_Frequency",
+        "frequency_public": "Public_Frequency",
+        "domain": "Domains",
+        "age": "Age",
+        "tool_use": "Tool_use"
     }
 
     comparison_column = comparison_column_map.get(comparison_type, comparison_type.capitalize())
@@ -224,7 +563,7 @@ def update_plot(chart_type, comparison_type, sort_by):
     # Create Human chart (use numerical values for y)
     human_fig = px.box(
         human_data, x="Feature", y="Numerical_Score", color=comparison_column,
-        title="Human Acceptability Scores",
+        title="Human Acceptability",
         color_discrete_map=legend_colors if comparison_type == "role" else None,
         category_orders={"Feature": list(sort_order), comparison_column: legend_order} if comparison_type == "role" else {"Feature": list(sort_order)}
     )
@@ -232,7 +571,7 @@ def update_plot(chart_type, comparison_type, sort_by):
     # Create AI chart (use numerical values for y)
     ai_fig = px.box(
         ai_data, x="Feature", y="Numerical_Score", color=comparison_column,
-        title="AI Acceptability Scores",
+        title="AI Acceptability",
         color_discrete_map=legend_colors if comparison_type == "role" else None,
         category_orders={"Feature": list(sort_order), comparison_column: legend_order} if comparison_type == "role" else {"Feature": list(sort_order)}
     )
@@ -258,8 +597,8 @@ def update_plot(chart_type, comparison_type, sort_by):
     )
 
     # Add a unique identifier to the chart data
-    human_fig.update_layout(title=f"Human Acceptability Scores - {time.time()}")
-    ai_fig.update_layout(title=f"AI Acceptability Scores - {time.time()}")
+    human_fig.update_layout(title=f"Human Acceptability")
+    ai_fig.update_layout(title=f"AI Acceptability")
 
 
     # Ensure the callback returns the correct figures
