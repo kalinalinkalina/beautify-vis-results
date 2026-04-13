@@ -67,6 +67,13 @@ def clean_teapot_data(file_path):
         df['Ethnicity'] = df['Ethnicity'].astype(str)
         df.loc[df['Ethnicity'].str.contains(',', na=False), 'Ethnicity'] = 'Mixed Race'
 
+    # Bucket the Age column into ranges for all downstream visualizations
+    if 'Age' in df.columns:
+        import numpy as np
+        bins = [17, 24, 34, 44, 54, 64, np.inf]
+        labels = ['18-24', '25-34', '35-44', '45-54', '55-64', '65+']
+        df['Age'] = pd.cut(df['Age'], bins=bins, labels=labels, right=True, include_lowest=True)
+
     # Split comma-separated values in 'Domains' and count each value individually
     if 'Domains' in df.columns:
         df['Domains'] = df['Domains'].astype(str)
