@@ -413,7 +413,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         'Numerical_Score',
                         groupKey,
                         {
-                            title: `Human Acceptability by Group`,
+                            title: `Acceptability of Human Alterations`,
                             colorMap: colorMap,
                             categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
                             xaxisTitle: 'Type of Alteration',
@@ -429,7 +429,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         'Numerical_Score',
                         groupKey,
                         {
-                            title: `AI Acceptability by Group`,
+                            title: `Acceptability of AI Alterations`,
                             colorMap: colorMap,
                             categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
                             xaxisTitle: 'Type of Alteration',
@@ -458,7 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         { 'Human': 'peru', 'AI': 'gray' },
                         ['Human', 'AI'],
                         {
-                            title: 'Mean Acceptability Scores by Feature (Human ● vs AI ○)',
+                            title: 'Mean Acceptability (Human ● vs AI ○)',
                             legendTitle: 'Type',
                             groupOrder: ['Human', 'AI'],
                             isGrouped: false,
@@ -576,7 +576,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         colorMap,
                         legendWithCounts,
                         {
-                            title: `Mean Acceptability Scores by Feature and Group (Human ● vs AI ○)`,
+                            title: `Mean Acceptability (Human ● vs AI ○)`,
                             legendTitle: 'Group',
                             groupOrder: legend,
                             traceNameMap: traceNameMap, // Pass traceNameMap
@@ -612,7 +612,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         { 'Human': 'peru', 'AI': 'gray' },
                         legendOrderWithCounts,
                         {
-                            title: 'Mean Acceptability Scores by Feature (Human vs AI)',
+                            title: 'Mean Acceptability (Human ● vs AI ○)',
                             legendTitle: 'Type',
                             traceNameMap: traceNameMap,
                             groupOrder: ['Human', 'AI'],  // Data lookup keys
@@ -723,7 +723,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         colorMap,
                         legendWithCounts, // Pass legend labels WITH counts as legendOrder for display
                         {
-                            title: `Mean Human Acceptability Scores by Feature and Group`,
+                            title: `Mean Acceptability for Human Alteration (±1 Stdev Bands)`,
                             legendTitle: 'Group',
                             traceNameMap: traceNameMap,
                             groupOrder: legend,  // Data lookup keys
@@ -737,7 +737,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         colorMap,
                         legendWithCounts, // Pass legend labels WITH counts as legendOrder for display
                         {
-                            title: `Mean AI Acceptability Scores by Feature and Group`,
+                            title: `Mean Acceptability for AI Alteration (±1 Stdev Bands)`,
                             legendTitle: 'Group',
                             forceAIStyle: true,
                             traceNameMap: traceNameMap,
