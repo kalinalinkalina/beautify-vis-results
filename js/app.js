@@ -274,7 +274,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('human-plot').style.display = 'block';
                     document.getElementById('ai-plot').style.display = 'none';
                 } else {
-                    // --- Dual plot logic for all other comparison types ---
+                    // --- Dual plot
+                    //  logic for all other comparison types ---
                     let meltedHuman = [];
                     let meltedAI = [];
                     let groupOrder = backendData.groups;
@@ -557,6 +558,155 @@ document.addEventListener('DOMContentLoaded', function() {
                     );
                     document.getElementById('human-plot').style.display = 'block';
                     document.getElementById('ai-plot').style.display = 'none';
+                }
+            } else if (chartType === 'line') {
+                if (comparisonType === 'human_ai') {
+                    const humanMeans = backendData.means['Human'] || {};
+                    const aiMeans = backendData.means['AI'] || {};
+                    // Sort features for plotting
+                    const featureOrder = getFeatureSortOrder(sortBy,
+                        Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
+                        Object.entries(aiMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
+                    );
+                    // Build traceNameMap for legend labels with counts
+                    const traceNameMap = {};
+                    const legendOrderWithCounts = [];
+                    ['Human', 'AI'].forEach(group => {
+                        const count = backendData.groupCounts && backendData.groupCounts[group] !== undefined ? backendData.groupCounts[group] : 0;
+                        traceNameMap[group] = `${group} (${count})`;
+                        legendOrderWithCounts.push(`${group} (${count})`);
+                    });
+                    window.makeLineChart(
+                        { 'Human': humanMeans, 'AI': aiMeans },
+                        featureOrder,
+                        { 'Human': 'peru', 'AI': 'gray' },
+                        legendOrderWithCounts,
+                        {
+                            title: 'Mean Acceptability Scores by Feature (Human vs AI)',
+                            legendTitle: 'Type',
+                            traceNameMap: traceNameMap,
+                            groupOrder: ['Human', 'AI']  // Data lookup keys
+                        },
+                        'human-plot'
+                    );
+                    document.getElementById('human-plot').style.display = 'block';
+                    document.getElementById('ai-plot').style.display = 'none';
+                } else {
+                    // --- Line chart logic for all other comparison types ---
+                    let groupMeansHuman = {};
+                    let groupMeansAI = {};
+                    let legend = backendData.groups;
+                    let legendWithCounts = [];
+                    let colorMap = {};
+                    let labelMap = null;
+                    let colorMapRaw = null;
+                    let order = null;
+                    if (GROUP_METADATA[comparisonType]) {
+                        labelMap = GROUP_METADATA[comparisonType].labelMap;
+                        colorMapRaw = GROUP_METADATA[comparisonType].colorMap;
+                        order = GROUP_METADATA[comparisonType].order;
+                    }
+                    
+                    // Build legend with proper order and counts
+                    if (labelMap) {
+                        // Apply label mapping and respect predefined order
+                        const shortNames = backendData.groups.map(g => labelMap && labelMap[g] ? labelMap[g] : g);
+                        
+                        // Start with predefined order if available, then add any missing
+                        let orderedNames = [];
+                        if (order) {
+                            orderedNames = order.filter(name => shortNames.includes(name));
+                            shortNames.forEach(name => {
+                                if (!orderedNames.includes(name)) orderedNames.push(name);
+                            });
+                        } else {
+                            orderedNames = shortNames;
+                        }
+                        
+                        legend = orderedNames;
+                        orderedNames.forEach((shortName, i) => {
+                            // Find the raw group name for this short name
+                            const rawGroup = backendData.groups.find(g => labelMap && labelMap[g] === shortName);
+                            const count = backendData.groupCounts && backendData.groupCounts[rawGroup] !== undefined ? backendData.groupCounts[rawGroup] : 0;
+                            legendWithCounts.push(`${shortName} (${count})`);
+                            
+                            groupMeansHuman[shortName] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
+                            groupMeansAI[shortName] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
+                        });
+                    } else {
+                        // No label mapping, but respect predefined order if available
+                        let orderedGroups = [];
+                        if (order) {
+                            orderedGroups = order.filter(name => backendData.groups.includes(name));
+                            backendData.groups.forEach(name => {
+                                if (!orderedGroups.includes(name)) orderedGroups.push(name);
+                            });
+                        } else {
+                            orderedGroups = backendData.groups;
+                        }
+                        
+                        legend = orderedGroups;
+                        orderedGroups.forEach(group => {
+                            const count = backendData.groupCounts && backendData.groupCounts[group] !== undefined ? backendData.groupCounts[group] : 0;
+                            legendWithCounts.push(`${group} (${count})`);
+                            
+                            groupMeansHuman[group] = backendData.meansHuman ? (backendData.meansHuman[group] || {}) : {};
+                            groupMeansAI[group] = backendData.meansAI ? (backendData.meansAI[group] || {}) : {};
+                        });
+                    }
+                    
+                    // Always ensure colorMap covers all legend entries
+                    legend.forEach((g, i) => {
+                        if (colorMapRaw && colorMapRaw[g]) {
+                            colorMap[g] = colorMapRaw[g];
+                        } else {
+                            const pxColors = [
+                                '#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52',
+                                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+                            ];
+                            colorMap[g] = pxColors[i % pxColors.length];
+                        }
+                    });
+                    // Sort features for plotting
+                    // Use meansHuman and meansAI to build arrays for getFeatureSortOrder
+                    const featureOrder = getFeatureSortOrder(sortBy,
+                        Object.entries(backendData.meansHuman || {}).flatMap(([Feature_Name, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v }))),
+                        Object.entries(backendData.meansAI || {}).flatMap(([Feature_Name, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v })))
+                    );
+                    // Build traceNameMap for legend labels with counts
+                    const traceNameMap = {};
+                    legend.forEach((group, i) => {
+                        traceNameMap[group] = legendWithCounts[i];
+                    });
+                    window.makeLineChart(
+                        groupMeansHuman,
+                        featureOrder,
+                        colorMap,
+                        legendWithCounts, // Pass legend labels WITH counts as legendOrder for display
+                        {
+                            title: `Mean Human Acceptability Scores by Feature and Group`,
+                            legendTitle: 'Group',
+                            traceNameMap: traceNameMap,
+                            groupOrder: legend  // Data lookup keys
+                        },
+                        'human-plot'
+                    );
+                    window.makeLineChart(
+                        groupMeansAI,
+                        featureOrder,
+                        colorMap,
+                        legendWithCounts, // Pass legend labels WITH counts as legendOrder for display
+                        {
+                            title: `Mean AI Acceptability Scores by Feature and Group`,
+                            legendTitle: 'Group',
+                            forceAIStyle: true,
+                            traceNameMap: traceNameMap,
+                            groupOrder: legend  // Data lookup keys
+                        },
+                        'ai-plot'
+                    );
+                    document.getElementById('human-plot').style.display = 'block';
+                    document.getElementById('ai-plot').style.display = 'block';
                 }
             } else {
                 document.getElementById('human-plot').innerHTML = '<div style="text-align:center;padding:2em;">Not implemented yet.</div>';

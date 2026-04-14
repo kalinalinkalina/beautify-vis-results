@@ -35,12 +35,14 @@ function doGet(e) {
     result = aggregateLineChart(data, comparisonType, sortBy);
   } else if (chartType === 'slope') {
     result = aggregateSlopeChart(data, comparisonType, sortBy);
+  } else if (chartType === 'swarm') { // Add swarm chart type
+    result = aggregateSwarmPlot(data, comparisonType, sortBy);
   } else {
     result = {error: 'Chart type not implemented.'};
   }
 
   // Defensive: Never allow raw data to be returned
-  if (result && Array.isArray(result)) {
+  if (result && Array.isArray(result) && chartType !== 'swarm') { // Allow array for swarm
     // If somehow an array (raw data) is returned, block it
     return ContentService
       .createTextOutput(JSON.stringify({error: 'Raw data access is forbidden by IRB policy.'}))
@@ -116,6 +118,87 @@ function cleanData(values) {
   });
 
   return mapped;
+}
+
+// --- Aggregation for Swarm Plot ---
+function aggregateSwarmPlot(data, comparisonType, sortBy) {
+  const features = [
+    'Smoothing', 'Textures', 'CamPos', 'Blur', 'Details', 'Errors',
+    'FeatureAddition', 'FeatureOmission', 'Gaps', 'Shape', 'Lighting',
+    'BgItems', 'BgImage', 'Position', 'Color'
+  ];
+  const likertMap = {
+    "Never acceptable": 0, "Rarely acceptable": 1, "Sometimes acceptable": 2,
+    "Often acceptable": 3, "Usually acceptable": 4, "Always acceptable": 5,
+    0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5
+  };
+
+  const output = {
+    features: features,
+    groups: [],
+    data: {},
+    humanGroups: [],
+    aiGroups: [],
+    groupCounts: {}
+  };
+
+  let groups = [];
+  let groupCounts = {};
+  if (comparisonType === 'human_ai') {
+    groups = ['Human', 'AI'];
+    groupCounts = { 'Human': data.length, 'AI': data.length };
+  } else {
+    const uniqueGroups = [...new Set(data.map(row => row[comparisonType]))];
+    groups = uniqueGroups.filter(g => g); // Filter out empty/null groups
+    groupCounts = groups.reduce((acc, group) => {
+      acc[group] = data.filter(row => row[comparisonType] === group).length;
+      return acc;
+    }, {});
+  }
+
+  output.groups = groups;
+  output.groupCounts = groupCounts;
+
+  if (comparisonType === 'human_ai') {
+    output.humanGroups = ['Human'];
+    output.aiGroups = ['AI'];
+  } else {
+    output.humanGroups = groups;
+    output.aiGroups = [];
+  }
+
+  // Initialize data structure
+  features.forEach(feature => {
+    output.data[feature] = {};
+    groups.forEach(group => {
+      output.data[feature][group] = []; // Store individual points
+    });
+  });
+
+  // Populate data
+  data.forEach(row => {
+    features.forEach(feature => {
+      if (comparisonType === 'human_ai') {
+        const humanVal = likertMap[row[`Acceptability_Human_${feature}`]];
+        const aiVal = likertMap[row[`Acceptability_AI_${feature}`]];
+        if (humanVal !== undefined) output.data[feature]['Human'].push(humanVal);
+        if (aiVal !== undefined) output.data[feature]['AI'].push(aiVal);
+      } else {
+        const group = row[comparisonType];
+        if (groups.includes(group)) {
+          const humanVal = likertMap[row[`Acceptability_Human_${feature}`]];
+          if (humanVal !== undefined) output.data[feature][group].push(humanVal);
+        }
+      }
+    });
+  });
+
+  // Sorting (if applicable, though less common for swarm plots)
+  // This part is complex for swarm plots and might not be needed.
+  // If sorting is required, it would likely be based on the median or mean of the points.
+  // For now, we'll keep the original feature order.
+
+  return output;
 }
 
 // --- Aggregation for Box Plot ---
