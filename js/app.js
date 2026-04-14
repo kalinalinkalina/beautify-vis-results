@@ -311,35 +311,22 @@ document.addEventListener('DOMContentLoaded', function() {
             // --- All other comparison types ---
             // Refine legend and color handling
             // Build presentGroups from cleanedData, not melted arrays, to ensure all possible groups are included
-            let presentGroups = [];
-            if (groupCol) {
-                let groupVals = cleanedData.map(row => row[groupCol]).filter(x => x !== undefined && x !== null && x !== '');
-                presentGroups = Array.from(new Set(groupVals));
-            }
-            // Accurate group counts: count unique rows in cleanedData for each group
-            let groupCounts = {};
-            if (groupCol) {
-                if (comparisonType === 'domain') {
-                    // For domain, explode and filter cleanedData, then count per domain
-                    let exploded = explodeDomains(cleanedData, groupCol)
-                        .filter(row => row[groupCol] && typeof row[groupCol] === 'string' && row[groupCol].toLowerCase() !== 'nan');
-                    presentGroups = Array.from(new Set(exploded.map(row => row[groupCol])));
-                    presentGroups.forEach(g => {
-                        groupCounts[g] = exploded.filter(row => row[groupCol] === g).length;
-                    });
-                } else {
-                    presentGroups.forEach(g => {
-                        groupCounts[g] = cleanedData.filter(row => displayLabel(row[groupCol]) === g).length;
-                    });
-                }
-            }
-            // Build legend labels with counts
-            let legendOrder = order ? order.filter(g => presentGroups.includes(g)) : presentGroups;
-            presentGroups.forEach(g => { if (!legendOrder.includes(g)) legendOrder.push(g); });
-            let legendLabelsWithCounts = legendOrder.map(g => `${g} (${groupCounts[g] || 0})`);
-            // Map displayGroup to label with count for plotting
-            let groupLabelMap = {};
-            legendOrder.forEach((g, i) => { groupLabelMap[g] = legendLabelsWithCounts[i]; });
+            // presentGroups now comes from group_counts_util
+            // --- Use group_counts_util for group counts, legend order, and legend label mapping ---
+            const groupCountsUtil = window.computeGroupCountsAndLabels;
+            const {
+                presentGroups,
+                groupCounts,
+                legendOrder,
+                legendLabelsWithCounts,
+                groupLabelMap
+            } = groupCountsUtil(
+                cleanedData,
+                groupCol,
+                labelMap,
+                order,
+                explodeDomains
+            );
             // Update _displayGroupWithCount for legend display only (not for grouping/coloring)
             meltedHuman.forEach(r => { if (r._displayGroup) r._displayGroupWithCount = groupLabelMap[r._displayGroup]; });
             meltedAI.forEach(r => { if (r._displayGroup) r._displayGroupWithCount = groupLabelMap[r._displayGroup]; });
@@ -396,10 +383,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         else if (label.includes('Viz Practitioner')) markerSymbols[label] = 'circle';
                         else if (label.includes('Scientist who creates vis')) markerSymbols[label] = 'square';
                         else if (label.includes('Scientist who uses vis')) markerSymbols[label] = 'square';
+                        else markerSymbols[label] = 'circle'; // fallback for any other group
                     });
                 } else if (comparisonType === 'frequency_public') {
                     groupDisplay.forEach(label => {
                         if (label.startsWith('Never')) markerSymbols[label] = 'x';
+                        else markerSymbols[label] = 'circle'; // fallback for any other group
                     });
                 } else {
                     // For all other groupings, force all markers to filled circle for Human chart

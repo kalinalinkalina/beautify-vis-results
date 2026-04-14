@@ -10,46 +10,32 @@
  * @param {string} containerId - DOM element id to render the plot
  */
 function makeBoxPlot(data, x, y, color, options, containerId) {
+    // All group/legend/label/color logic is handled in app.js/data cleaning
     const {
         title = '',
         colorMap = {},
         categoryOrders = {},
         xaxisTitle = '',
         yaxisTitle = '',
-        legendOrder = null, // Pass legendOrder for consistent legend ordering
-        legendLabelsWithCounts = null // Map from group to label with count
+        legendOrder = null,
+        legendLabelsWithCounts = null
     } = options || {};
 
-    // Get unique groups for color, but use legendOrder if provided
-    const groups = legendOrder ? legendOrder : [...new Set(data.map(row => row[color]))];
-    const traces = groups.map(group => {
-        const groupData = data.filter(row => row[color] === group);
-        // Use label with count if provided, else group name
-        const traceName = legendLabelsWithCounts && legendLabelsWithCounts[group] ? legendLabelsWithCounts[group] : group;
-        return {
-            y: groupData.map(row => row[y]),
-            x: groupData.map(row => row[x]),
-            name: traceName,
-            type: 'box',
-            marker: { color: colorMap[group] || undefined },
-            boxpoints: 'outliers', // Show outliers as dots
-            boxmean: false,
-            line: { width: 2 }, // Median line thickness (default for box border)
-            median: { line: { width: 4 } } // Median line 2x thicker
-        };
+    const traces = window.buildTracesFromGroups(data, color, x, y, {
+        colorMap,
+        traceType: 'box',
+        traceNameMap: legendLabelsWithCounts || {}
     });
-
-    // X tick labels
     const xVals = [...new Set(data.map(row => row[x]))];
-    const xTickText = xVals.map(val => FEATURE_LABELS[val] || val);
-
+    const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(xVals, FEATURE_LABELS);
+    const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
     const layout = {
         title,
         boxmode: 'group',
         xaxis: {
             title: xaxisTitle,
             tickangle: 30,
-            tickvals: xVals,
+            tickvals: xTickVals,
             ticktext: xTickText,
             categoryorder: 'array',
             categoryarray: categoryOrders[x] || xVals
@@ -57,15 +43,14 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         yaxis: {
             title: yaxisTitle,
             tickmode: 'array',
-            tickvals: [0, 1, 2, 3, 4, 5],
-            ticktext: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"]
+            tickvals: yTickVals,
+            ticktext: yTickText
         },
         margin: { r: 180 },
         legend: legendOrder ? { traceorder: 'normal' } : undefined
     };
-    // Remove any traces with falsy names or named 'trace' (should not appear in legend or plot)
-    const filteredTraces = traces.filter(t => t.name && t.name.toLowerCase() !== 'trace');
-    if (filteredTraces.length === 0) return; // Don't plot if nothing valid
+    const filteredTraces = window.filterValidTraces(traces);
+    if (filteredTraces.length === 0) return;
     Plotly.newPlot(containerId, filteredTraces, layout, {responsive: true});
 }
 
@@ -79,7 +64,7 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
  * @param {string} containerId - DOM element id to render the plot
  */
 function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, options, containerId) {
-    // Defensive: ensure options is always an object
+    // All group/legend/label/color logic is handled in app.js/data cleaning
     options = options || {};
     const title = options.title || '';
     const legendTitle = options.legendTitle || '';
@@ -88,18 +73,18 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const forceFilledCircle = options.forceFilledCircle || false;
     const sharedLayout = options.sharedLayout || null;
     const traces = legendOrder.map(group => {
-        // Always use the full featureOrder for x, and set y to null for missing values or NaN
         const groupData = meanScoresDict.hasOwnProperty(group) ? meanScoresDict[group] : {};
         const xVals = featureOrder;
         const yVals = featureOrder.map(f => {
             const v = groupData && groupData.hasOwnProperty(f) ? groupData[f] : null;
-            // Ignore NaN, undefined, or null
             return (v !== null && v !== undefined && !Number.isNaN(v)) ? v : null;
         });
         let marker;
-        // Debug logging for marker logic
-        console.debug('[makeLineChart] group:', group, 'forceAIStyle:', forceAIStyle, 'forceFilledCircle:', forceFilledCircle, 'safeMarkerSymbols:', safeMarkerSymbols[group], 'legendColors:', legendColors[group]);
-        if (forceAIStyle || (typeof group === 'string' && group.toLowerCase().includes('ai'))) {
+        if (
+            forceAIStyle ||
+            (typeof group === 'string' && group.toLowerCase().includes('ai') && !group.toLowerCase().includes('daily'))
+        ) {
+            // AI: outlined marker with white fill
             marker = {
                 size: 10,
                 symbol: safeMarkerSymbols[group] || 'circle',
@@ -107,6 +92,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 line: { color: legendColors[group] || '#222', width: 3 }
             };
         } else if (safeMarkerSymbols[group]) {
+            // Human: use group color as fill
             marker = {
                 size: 10,
                 symbol: safeMarkerSymbols[group],
@@ -114,47 +100,45 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 opacity: 1
             };
         } else {
-            // Default: always filled circle, no outline
+            // Human default: filled circle with group color
             marker = {
                 size: 10,
                 symbol: 'circle',
-                color: legendColors[group] || undefined,
+                color: legendColors[group] || '#222',
                 opacity: 1
             };
         }
-        console.debug('[makeLineChart] marker for group', group, marker);
         return {
             x: xVals,
             y: yVals,
-            name: group, // Always use plain group name
+            name: group,
             mode: 'lines+markers',
             line: { color: legendColors[group] || undefined, width: 2 },
             marker: marker,
-            connectgaps: true // Connect gaps, but NaNs/nulls are still not plotted
+            connectgaps: true
         };
     });
-    // Remove any traces with falsy names or named 'trace' (should not appear in legend or plot)
-    const filteredTraces = traces.filter(t => t.name && t.name.toLowerCase() !== 'trace');
-    // Plot all traces, even if all y are null (so legend is consistent)
-    if (filteredTraces.length === 0) return; // Don't plot if nothing valid
+    const filteredTraces = window.filterValidTraces(traces);
+    if (filteredTraces.length === 0) return;
     let layout;
     if (sharedLayout) {
         layout = Object.assign({}, sharedLayout, { title, legend: { title: { text: legendTitle } } });
     } else {
-        const xTickText = featureOrder.map(val => FEATURE_LABELS[val] || val);
+        const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(featureOrder, FEATURE_LABELS);
+        const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
         layout = {
             title,
             xaxis: {
                 title: 'Type of Alteration',
                 tickangle: 30,
-                tickvals: featureOrder,
+                tickvals: xTickVals,
                 ticktext: xTickText
             },
             yaxis: {
                 title: 'Acceptability',
                 tickmode: 'array',
-                tickvals: [0, 1, 2, 3, 4, 5],
-                ticktext: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
+                tickvals: yTickVals,
+                ticktext: yTickText,
                 range: [-0.5, 5.5]
             },
             legend: { title: { text: legendTitle } },
@@ -162,8 +146,6 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             margin: { r: 180 }
         };
     }
-    // If you want to display (N) in the legend, you can customize legend labels here using Plotly's legendgroup or custom hover/legend formatting.
-    // But trace.name should always be plain group name.
     Plotly.newPlot(containerId, filteredTraces, layout, {responsive: true});
 }
 
