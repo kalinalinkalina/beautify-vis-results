@@ -458,7 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         { 'Human': 'peru', 'AI': 'gray' },
                         ['Human', 'AI'],
                         {
-                            title: 'Mean Acceptability with ±1 Stdev Bands (Human ● vs AI ○)',
+                            title: 'Mean Acceptability (Human ● vs AI ○)',
                             legendTitle: 'Type',
                             groupOrder: ['Human', 'AI'],
                             isGrouped: false,
@@ -576,7 +576,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         colorMap,
                         legendWithCounts,
                         {
-                            title: `Mean Acceptability with ±1 Stdev Bands (Human ● vs AI ○)`,
+                            title: `Mean Acceptability (Human ● vs AI ○)`,
                             legendTitle: 'Group',
                             groupOrder: legend,
                             traceNameMap: traceNameMap, // Pass traceNameMap
