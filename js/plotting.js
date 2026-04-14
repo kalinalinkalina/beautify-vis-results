@@ -18,17 +18,36 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         xaxisTitle = '',
         yaxisTitle = '',
         legendOrder = null,
-        legendLabelsWithCounts = null
+        traceNameMap = null
     } = options || {};
 
     const traces = window.buildTracesFromGroups(data, color, x, y, {
         colorMap,
         traceType: 'box',
-        traceNameMap: legendLabelsWithCounts || {}
+        traceNameMap: traceNameMap || {}
     });
     const xVals = [...new Set(data.map(row => row[x]))];
     const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(xVals, FEATURE_LABELS);
     const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
+    
+    // Sort traces according to legendOrder if provided
+    let sortedTraces = traces;
+    if (legendOrder && legendOrder.length > 0) {
+        sortedTraces = [];
+        legendOrder.forEach(traceNameToFind => {
+            const traceIndex = traces.findIndex(t => t.name === traceNameToFind);
+            if (traceIndex !== -1) {
+                sortedTraces.push(traces[traceIndex]);
+            }
+        });
+        // Append any traces not in legendOrder (shouldn't happen but be safe)
+        traces.forEach(trace => {
+            if (!sortedTraces.includes(trace)) {
+                sortedTraces.push(trace);
+            }
+        });
+    }
+    
     const layout = {
         title,
         boxmode: 'group',
@@ -47,9 +66,11 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
             ticktext: yTickText
         },
         margin: { r: 180 },
-        legend: legendOrder ? { traceorder: 'normal' } : undefined
+        legend: legendOrder ? { 
+            traceorder: 'normal'
+        } : undefined
     };
-    const filteredTraces = window.filterValidTraces(traces);
+    const filteredTraces = window.filterValidTraces(sortedTraces);
     if (filteredTraces.length === 0) return;
     Plotly.newPlot(containerId, filteredTraces, layout, {responsive: true});
 }
@@ -69,16 +90,40 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const title = options.title || '';
     const legendTitle = options.legendTitle || '';
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
+    // Force squares for scientist groups
+    const scientistGroups = [
+        'Scientist who creates vis',
+        'Scientist who uses vis'
+    ];
+    // Special group for X marker
+    const xMarkerGroups = [
+        'Never'
+    ];
     const forceAIStyle = options.forceAIStyle || false;
-    const forceFilledCircle = options.forceFilledCircle || false;
     const sharedLayout = options.sharedLayout || null;
-    const traces = legendOrder.map(group => {
+    // Accept traceNameMap for legend labels with counts
+    const traceNameMap = options.traceNameMap || {};
+    // Accept groupOrder (short names for data lookup) separate from legendOrder (display names)
+    const groupOrder = options.groupOrder || legendOrder;
+    
+    // Filter out nan/null/empty group names from groupOrder
+    const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
+    const traces = validGroupOrder.map(group => {
         const groupData = meanScoresDict.hasOwnProperty(group) ? meanScoresDict[group] : {};
         const xVals = featureOrder;
         const yVals = featureOrder.map(f => {
             const v = groupData && groupData.hasOwnProperty(f) ? groupData[f] : null;
             return (v !== null && v !== undefined && !Number.isNaN(v)) ? v : null;
         });
+        let markerSymbol = safeMarkerSymbols[group] || 'circle';
+        // Force squares for scientist groups
+        if (scientistGroups.includes(group)) {
+            markerSymbol = 'square';
+        }
+        // Force X for Never group
+        if (xMarkerGroups.includes(group)) {
+            markerSymbol = 'x';
+        }
         let marker;
         if (
             forceAIStyle ||
@@ -87,23 +132,15 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             // AI: outlined marker with white fill
             marker = {
                 size: 10,
-                symbol: safeMarkerSymbols[group] || 'circle',
+                symbol: markerSymbol,
                 color: '#fff',
                 line: { color: legendColors[group] || '#222', width: 3 }
             };
-        } else if (safeMarkerSymbols[group]) {
-            // Human: use group color as fill
-            marker = {
-                size: 10,
-                symbol: safeMarkerSymbols[group],
-                color: legendColors[group] || undefined,
-                opacity: 1
-            };
         } else {
-            // Human default: filled circle with group color
+            // Human: filled marker with group color
             marker = {
                 size: 10,
-                symbol: 'circle',
+                symbol: markerSymbol,
                 color: legendColors[group] || '#222',
                 opacity: 1
             };
@@ -111,7 +148,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
         return {
             x: xVals,
             y: yVals,
-            name: group,
+            name: traceNameMap[group] || group,
             mode: 'lines+markers',
             line: { color: legendColors[group] || undefined, width: 2 },
             marker: marker,
@@ -120,9 +157,22 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     });
     const filteredTraces = window.filterValidTraces(traces);
     if (filteredTraces.length === 0) return;
+    
+    // Build the legend category array from actual trace names (which may have counts)
+    const legendCategoryArray = filteredTraces.map(trace => trace.name);
+    
     let layout;
     if (sharedLayout) {
-        layout = Object.assign({}, sharedLayout, { title, legend: { title: { text: legendTitle } } });
+        layout = Object.assign({}, sharedLayout, { 
+            title,
+            legend: Object.assign({}, sharedLayout.legend || {}, {
+                orientation: 'v',
+                x: 1,
+                xanchor: 'left',
+                y: 1,
+                yanchor: 'top'
+            })
+        });
     } else {
         const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(featureOrder, FEATURE_LABELS);
         const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
@@ -141,7 +191,13 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 ticktext: yTickText,
                 range: [-0.5, 5.5]
             },
-            legend: { title: { text: legendTitle } },
+            legend: {
+                orientation: 'v',
+                x: 1,
+                xanchor: 'left',
+                y: 1,
+                yanchor: 'top'
+            },
             height: 500,
             margin: { r: 180 }
         };

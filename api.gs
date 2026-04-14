@@ -260,29 +260,59 @@ function aggregateLineChart(data, comparisonType, sortBy) {
     groups: [],
     means: {},
     meansHuman: {},
-    meansAI: {}
+    meansAI: {},
+    groupCounts: {} // <-- add groupCounts to output
   };
 
-  // Determine groups
+  // Determine groups and group counts
   let groups = [];
+  let groupCounts = {};
   if (comparisonType === 'human_ai') {
     groups = ['Human', 'AI'];
+    groupCounts['Human'] = data.filter(d => {
+      return Object.keys(d).some(k => k.startsWith('Acceptability_Human_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
+    }).length;
+    groupCounts['AI'] = data.filter(d => {
+      return Object.keys(d).some(k => k.startsWith('Acceptability_AI_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
+    }).length;
   } else if (comparisonType === 'role') {
     groups = Array.from(new Set(data.map(d => d['Vis_Role'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Vis_Role'] === g).length;
+    });
   } else if (comparisonType === 'experience') {
     groups = Array.from(new Set(data.map(d => d['Vis_Length'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Vis_Length'] === g).length;
+    });
   } else if (comparisonType === 'frequency_vis') {
     groups = Array.from(new Set(data.map(d => d['Vis_Frequency'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Vis_Frequency'] === g).length;
+    });
   } else if (comparisonType === 'frequency_public') {
     groups = Array.from(new Set(data.map(d => d['Public_Frequency'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Public_Frequency'] === g).length;
+    });
   } else if (comparisonType === 'domain') {
     groups = Array.from(new Set([].concat(...data.map(d => d['Domains'] || []))));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => (d['Domains'] || []).includes(g)).length;
+    });
   } else if (comparisonType === 'age') {
     groups = Array.from(new Set(data.map(d => d['Age'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Age'] === g).length;
+    });
   } else if (comparisonType === 'tool_use') {
     groups = Array.from(new Set(data.map(d => d['Tool_use'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Tool_use'] === g).length;
+    });
   }
   output.groups = groups;
+  output.groupCounts = groupCounts;
 
   // No feature sorting here; handled on frontend
 
