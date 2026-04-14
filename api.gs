@@ -33,6 +33,8 @@ function doGet(e) {
     result = aggregateBoxPlot(data, comparisonType, sortBy);
   } else if (chartType === 'line') {
     result = aggregateLineChart(data, comparisonType, sortBy);
+  } else if (chartType === 'slope') {
+    result = aggregateSlopeChart(data, comparisonType, sortBy);
   } else {
     result = {error: 'Chart type not implemented.'};
   }
@@ -357,19 +359,137 @@ function aggregateLineChart(data, comparisonType, sortBy) {
   return output;
 }
 
+// --- Aggregation for Slope Chart (Means) ---
+// Returns only aggregated means for slope charts (never raw data)
+// Same structure as line chart but can be used to show Human vs AI on same chart
+function aggregateSlopeChart(data, comparisonType, sortBy) {
+  // Acceptability columns and mapping
+  const features = [
+    'Smoothing', 'Textures', 'CamPos', 'Blur', 'Details', 'Errors',
+    'FeatureAddition', 'FeatureOmission', 'Gaps', 'Shape', 'Lighting',
+    'BgItems', 'BgImage', 'Position', 'Color'
+  ];
+  const likertMap = {
+    "Never acceptable": 0, "Rarely acceptable": 1, "Sometimes acceptable": 2,
+    "Often acceptable": 3, "Usually acceptable": 4, "Always acceptable": 5,
+    0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 // In case already mapped
+  };
+
+  // Prepare output structure (same as line chart)
+  const output = {
+    features: features,
+    groups: [],
+    meansHuman: {},
+    meansAI: {},
+    groupCounts: {} // <-- add groupCounts to output
+  };
+
+  // Determine groups and group counts
+  let groups = [];
+  let groupCounts = {};
+  if (comparisonType === 'human_ai') {
+    groups = ['Human', 'AI'];
+    groupCounts['Human'] = data.filter(d => {
+      return Object.keys(d).some(k => k.startsWith('Acceptability_Human_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
+    }).length;
+    groupCounts['AI'] = data.filter(d => {
+      return Object.keys(d).some(k => k.startsWith('Acceptability_AI_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
+    }).length;
+  } else if (comparisonType === 'role') {
+    groups = Array.from(new Set(data.map(d => d['Vis_Role'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Vis_Role'] === g).length;
+    });
+  } else if (comparisonType === 'experience') {
+    groups = Array.from(new Set(data.map(d => d['Vis_Length'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Vis_Length'] === g).length;
+    });
+  } else if (comparisonType === 'frequency_vis') {
+    groups = Array.from(new Set(data.map(d => d['Vis_Frequency'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Vis_Frequency'] === g).length;
+    });
+  } else if (comparisonType === 'frequency_public') {
+    groups = Array.from(new Set(data.map(d => d['Public_Frequency'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Public_Frequency'] === g).length;
+    });
+  } else if (comparisonType === 'domain') {
+    groups = Array.from(new Set([].concat(...data.map(d => d['Domains'] || []))));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => (d['Domains'] || []).includes(g)).length;
+    });
+  } else if (comparisonType === 'age') {
+    groups = Array.from(new Set(data.map(d => d['Age'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Age'] === g).length;
+    });
+  } else if (comparisonType === 'tool_use') {
+    groups = Array.from(new Set(data.map(d => d['Tool_use'])));
+    groups.forEach(g => {
+      groupCounts[g] = data.filter(d => d['Tool_use'] === g).length;
+    });
+  }
+  output.groups = groups;
+  output.groupCounts = groupCounts;
+
+  // No feature sorting here; handled on frontend
+
+  // For each group and feature, calculate mean
+  groups.forEach(group => {
+    output.meansHuman[group] = {};
+    output.meansAI[group] = {};
+    features.forEach(feat => {
+      let scoresHuman = [];
+      let scoresAI = [];
+      if (comparisonType === 'human_ai') {
+        if (group === 'Human') {
+          scoresHuman = data.map(d => likertMap[d['Acceptability_Human_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
+          output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
+        } else {
+          scoresAI = data.map(d => likertMap[d['Acceptability_AI_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
+          output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
+        }
+      } else if (comparisonType === 'domain') {
+        scoresHuman = data.filter(d => (d['Domains'] || []).includes(group))
+          .map(d => likertMap[d['Acceptability_Human_' + feat]])
+          .filter(v => v !== undefined && v !== null && v !== '');
+        scoresAI = data.filter(d => (d['Domains'] || []).includes(group))
+          .map(d => likertMap[d['Acceptability_AI_' + feat]])
+          .filter(v => v !== undefined && v !== null && v !== '');
+        output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
+        output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
+      } else {
+        scoresHuman = data.filter(d => d[getComparisonCol(comparisonType)] === group)
+          .map(d => likertMap[d['Acceptability_Human_' + feat]])
+          .filter(v => v !== undefined && v !== null && v !== '');
+        scoresAI = data.filter(d => d[getComparisonCol(comparisonType)] === group)
+          .map(d => likertMap[d['Acceptability_AI_' + feat]])
+          .filter(v => v !== undefined && v !== null && v !== '');
+        output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
+        output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
+      }
+    });
+  });
+
+  return output;
+}
+
 // --- Helper to map comparison type to column name ---
 
 /**
  * API Documentation:
  *
  * GET endpoint (doGet):
- *   - chartType: 'box' or 'line'
+ *   - chartType: 'box', 'line', or 'slope'
  *   - comparisonType: 'human_ai', 'role', 'experience', 'frequency_vis', 'frequency_public', 'domain', 'age', 'tool_use'
  *   - sortBy: (optional, for future use)
  *
  * Returns:
  *   For 'box': { features, groups, data } (aggregated scores per group/feature)
  *   For 'line': { features, groups, means } (mean scores per group/feature)
+ *   For 'slope': { features, groups, meansHuman, meansAI } (mean scores for both human and AI)
  *
  * This API will NEVER return raw or row-level data, in compliance with IRB requirements.
  */

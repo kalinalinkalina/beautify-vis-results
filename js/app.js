@@ -425,40 +425,33 @@ document.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('human-plot').style.display = 'block';
                     document.getElementById('ai-plot').style.display = 'block';
                 }
-            } else if (chartType === 'line') {
+            } else if (chartType === 'slope') {
                 if (comparisonType === 'human_ai') {
-                    const humanMeans = backendData.means['Human'] || {};
-                    const aiMeans = backendData.means['AI'] || {};
+                    const humanMeans = backendData.meansHuman['Human'] || {};
+                    const aiMeans = backendData.meansAI['AI'] || {};
                     // Sort features for plotting
                     const featureOrder = getFeatureSortOrder(sortBy,
                         Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
                         Object.entries(aiMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
                     );
-                    // Build traceNameMap for legend labels with counts
-                    const traceNameMap = {};
-                    const legendOrderWithCounts = [];
-                    ['Human', 'AI'].forEach(group => {
-                        const count = backendData.groupCounts && backendData.groupCounts[group] !== undefined ? backendData.groupCounts[group] : 0;
-                        traceNameMap[group] = `${group} (${count})`;
-                        legendOrderWithCounts.push(`${group} (${count})`);
-                    });
-                    window.makeLineChart(
-                        { 'Human': humanMeans, 'AI': aiMeans },
+                    window.makeSlopeChart(
+                        { 'Human': humanMeans },
+                        { 'AI': aiMeans },
                         featureOrder,
                         { 'Human': 'peru', 'AI': 'gray' },
-                        legendOrderWithCounts,
+                        ['Human', 'AI'],
                         {
                             title: 'Mean Acceptability Scores by Feature (Human vs AI)',
                             legendTitle: 'Type',
-                            traceNameMap: traceNameMap,
-                            groupOrder: ['Human', 'AI']  // Data lookup keys
+                            groupOrder: ['Human', 'AI'],
+                            isGrouped: false
                         },
                         'human-plot'
                     );
                     document.getElementById('human-plot').style.display = 'block';
                     document.getElementById('ai-plot').style.display = 'none';
                 } else {
-                    // --- Dual plot logic for all other comparison types ---
+                    // --- Slope chart logic for all other comparison types ---
                     let groupMeansHuman = {};
                     let groupMeansAI = {};
                     let legend = backendData.groups;
@@ -541,38 +534,28 @@ document.addEventListener('DOMContentLoaded', function() {
                     );
                     // Build traceNameMap for legend labels with counts
                     const traceNameMap = {};
-                    legend.forEach((group, i) => {
-                        traceNameMap[group] = legendWithCounts[i];
+                    legend.forEach(group => {
+                        const rawGroup = labelMap ? backendData.groups.find(g => labelMap[g] === group) : group;
+                        const count = backendData.groupCounts && backendData.groupCounts[rawGroup] !== undefined ? backendData.groupCounts[rawGroup] : 0;
+                        traceNameMap[group] = `${group} (${count})`;
                     });
-                    window.makeLineChart(
+                    window.makeSlopeChart(
                         groupMeansHuman,
-                        featureOrder,
-                        colorMap,
-                        legendWithCounts, // Pass legend labels WITH counts as legendOrder for display
-                        {
-                            title: `Mean Human Acceptability Scores by Feature and Group`,
-                            legendTitle: 'Group',
-                            traceNameMap: traceNameMap,
-                            groupOrder: legend  // Data lookup keys
-                        },
-                        'human-plot'
-                    );
-                    window.makeLineChart(
                         groupMeansAI,
                         featureOrder,
                         colorMap,
-                        legendWithCounts, // Pass legend labels WITH counts as legendOrder for display
+                        legendWithCounts,
                         {
-                            title: `Mean AI Acceptability Scores by Feature and Group`,
+                            title: `Mean Acceptability Scores by Feature and Group (Human ● vs AI)`,
                             legendTitle: 'Group',
-                            forceAIStyle: true,
-                            traceNameMap: traceNameMap,
-                            groupOrder: legend  // Data lookup keys
+                            groupOrder: legend,
+                            traceNameMap: traceNameMap, // Pass traceNameMap
+                            isGrouped: true
                         },
-                        'ai-plot'
+                        'human-plot'
                     );
                     document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'block';
+                    document.getElementById('ai-plot').style.display = 'none';
                 }
             } else {
                 document.getElementById('human-plot').innerHTML = '<div style="text-align:center;padding:2em;">Not implemented yet.</div>';
@@ -625,5 +608,5 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Backend API endpoint for aggregated data
-const API_URL = 'https://script.google.com/macros/s/AKfycbwxG7YvaN3ZnCRu4UBYM6jq3gkmTFMEYhe-8ddjngoEiluGlwzxeQX3wsOPoUv0LEEj/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbyX_yBZrP_9zrOmt24QXSI0i44BEYxSHXHC3ojoHjk7OBLmsOu2CSlQ1O8flpzs5wOq/exec';
 

@@ -205,6 +205,203 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     Plotly.newPlot(containerId, filteredTraces, layout, {responsive: true});
 }
 
+/**
+ * Draws a slope chart using Plotly.js
+ * Shows Human vs AI comparisons with connecting lines and separate markers
+ * For grouped comparisons (role, experience, etc.), shows separate slopes for each group
+ * @param {Object} meanScoresDict - { group: { feature: mean, ... }, ... } for both human and AI
+ * @param {Object} meanScoresDictAI - AI means (same structure)
+ * @param {Array<string>} featureOrder - Order of features for x-axis
+ * @param {Object} legendColors - { group: color, ... }
+ * @param {Array<string>} legendOrder - Order of groups in legend
+ * @param {Object} options - { title, legendTitle, markerSymbols, isGrouped, traceNameMap }
+ * @param {string} containerId - DOM element id to render the plot
+ */
+function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendColors, legendOrder, options, containerId) {
+    options = options || {};
+    const title = options.title || '';
+    const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
+    const isGrouped = options.isGrouped || false;
+    const groupOrder = options.groupOrder || legendOrder;
+    const traceNameMap = options.traceNameMap || {}; // Extract traceNameMap from options
+    
+    // Force squares for scientist groups
+    const scientistGroups = [
+        'Scientist who creates vis',
+        'Scientist who uses vis'
+    ];
+    // Special group for X marker
+    const xMarkerGroups = [
+        'Never'
+    ];
+    
+    const traces = [];
+    let xCounter = 0;
+    const featureXPositions = {}; // Map feature to x-axis position
+    
+    // For each feature, create slope traces
+    featureOrder.forEach((feature, featureIdx) => {
+        const featureX = featureIdx;
+        featureXPositions[feature] = featureX;
+        
+        if (isGrouped) {
+            // For grouped comparisons: create separate slopes for each group
+            const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
+            
+            validGroupOrder.forEach((group, groupIdx) => {
+                const humanMean = meanScoresDict[group] && meanScoresDict[group][feature] ? meanScoresDict[group][feature] : null;
+                const aiMean = meanScoresDictAI[group] && meanScoresDictAI[group][feature] ? meanScoresDictAI[group][feature] : null;
+                
+                if (humanMean === null || aiMean === null) return;
+                
+                // Offset each group's slope horizontally
+                const groupOffsetFactor = (groupIdx - (validGroupOrder.length - 1) / 2) * 0.15;
+                const humanX = featureX + groupOffsetFactor - 0.1;
+                const aiX = featureX + groupOffsetFactor + 0.1;
+                
+                // Add connecting line
+                traces.push({
+                    x: [humanX, aiX],
+                    y: [humanMean, aiMean],
+                    mode: 'lines',
+                    line: { color: legendColors[group] || '#999', width: 2 },
+                    showlegend: false,
+                    hoverinfo: 'skip',
+                    name: ''
+                });
+                
+                // Add human marker (filled)
+                let markerSymbol = safeMarkerSymbols[group] || 'circle';
+                if (scientistGroups.includes(group)) {
+                    markerSymbol = 'square';
+                }
+                if (xMarkerGroups.includes(group)) {
+                    markerSymbol = 'x';
+                }
+                
+                traces.push({
+                    x: [humanX],
+                    y: [humanMean],
+                    mode: 'markers',
+                    marker: {
+                        size: 12,
+                        symbol: markerSymbol,
+                        color: legendColors[group] || '#222',
+                        opacity: 1
+                    },
+                    showlegend: featureIdx === 0, // Show legend only for the first feature
+                    legendgroup: group, // Group legend entries by group
+                    hovertemplate: `<b>${group}</b><br>Human: ${humanMean.toFixed(2)}<extra></extra>`,
+                    name: traceNameMap[group] || group
+                });
+                
+                // Add AI marker (outlined)
+                traces.push({
+                    x: [aiX],
+                    y: [aiMean],
+                    mode: 'markers',
+                    marker: {
+                        size: 12,
+                        symbol: markerSymbol,
+                        color: '#fff',
+                        line: { color: legendColors[group] || '#222', width: 3 }
+                    },
+                    showlegend: false, // Do not show AI markers in the legend
+                    hovertemplate: `<b>${group}</b><br>AI: ${aiMean.toFixed(2)}<extra></extra>`,
+                    name: ''
+                });
+            });
+        } else {
+            // For human_ai comparison: single slope per feature
+            const humanMean = meanScoresDict['Human'] && meanScoresDict['Human'][feature] ? meanScoresDict['Human'][feature] : null;
+            const aiMean = meanScoresDictAI['AI'] && meanScoresDictAI['AI'][feature] ? meanScoresDictAI['AI'][feature] : null;
+            
+            if (humanMean === null || aiMean === null) return;
+            
+            const humanX = featureX - 0.15;
+            const aiX = featureX + 0.15;
+            
+            // Add connecting line
+            traces.push({
+                x: [humanX, aiX],
+                y: [humanMean, aiMean],
+                mode: 'lines',
+                line: { color: '#999', width: 2 },
+                showlegend: false,
+                hoverinfo: 'skip',
+                name: ''
+            });
+            
+            // Add human marker (filled)
+            traces.push({
+                x: [humanX],
+                y: [humanMean],
+                mode: 'markers',
+                marker: {
+                    size: 12,
+                    symbol: 'circle',
+                    color: legendColors['Human'] || 'peru',
+                    opacity: 1
+                },
+                showlegend: feature === featureOrder[0],
+                legendgroup: 'human',
+                hovertemplate: `Human: ${humanMean.toFixed(2)}<extra></extra>`,
+                name: 'Human'
+            });
+            
+            // Add AI marker (outlined)
+            traces.push({
+                x: [aiX],
+                y: [aiMean],
+                mode: 'markers',
+                marker: {
+                    size: 12,
+                    symbol: 'circle',
+                    color: '#fff',
+                    line: { color: legendColors['AI'] || 'gray', width: 3 }
+                },
+                showlegend: feature === featureOrder[0],
+                legendgroup: 'ai',
+                hovertemplate: `AI: ${aiMean.toFixed(2)}<extra></extra>`,
+                name: 'AI'
+            });
+        }
+    });
+    
+    const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(featureOrder, FEATURE_LABELS);
+    const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
+    
+    const layout = {
+        title,
+        xaxis: {
+            title: 'Type of Alteration',
+            tickangle: 30,
+            tickvals: featureOrder.map((_, i) => i),
+            ticktext: xTickText,
+            range: [-0.5, featureOrder.length - 0.5]
+        },
+        yaxis: {
+            title: 'Acceptability',
+            tickmode: 'array',
+            tickvals: yTickVals,
+            ticktext: yTickText,
+            range: [-0.5, 5.5]
+        },
+        legend: {
+            orientation: 'v',
+            x: 1,
+            xanchor: 'left',
+            y: 1,
+            yanchor: 'top'
+        },
+        height: 500,
+        margin: { r: 180 },
+        hovermode: 'closest'
+    };
+    
+    Plotly.newPlot(containerId, traces, layout, {responsive: true});
+}
+
 // Human-readable feature name mapping (should match Python FEATURE_LABELS)
 const FEATURE_LABELS = {
     "CamPos": "Camera Position",
@@ -228,5 +425,6 @@ const FEATURE_LABELS = {
 if (typeof window !== 'undefined') {
     window.makeBoxPlot = makeBoxPlot;
     window.makeLineChart = makeLineChart;
+    window.makeSlopeChart = makeSlopeChart;
     window.FEATURE_LABELS = FEATURE_LABELS;
 }
