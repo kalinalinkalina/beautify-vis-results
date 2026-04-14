@@ -16,17 +16,20 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         categoryOrders = {},
         xaxisTitle = '',
         yaxisTitle = '',
-        legendOrder = null // Pass legendOrder for consistent legend ordering
+        legendOrder = null, // Pass legendOrder for consistent legend ordering
+        legendLabelsWithCounts = null // Map from group to label with count
     } = options || {};
 
     // Get unique groups for color, but use legendOrder if provided
     const groups = legendOrder ? legendOrder : [...new Set(data.map(row => row[color]))];
     const traces = groups.map(group => {
         const groupData = data.filter(row => row[color] === group);
+        // Use label with count if provided, else group name
+        const traceName = legendLabelsWithCounts && legendLabelsWithCounts[group] ? legendLabelsWithCounts[group] : group;
         return {
             y: groupData.map(row => row[y]),
             x: groupData.map(row => row[x]),
-            name: group, // Always use plain group name
+            name: traceName,
             type: 'box',
             marker: { color: colorMap[group] || undefined },
             boxpoints: 'outliers', // Show outliers as dots
@@ -94,6 +97,8 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             return (v !== null && v !== undefined && !Number.isNaN(v)) ? v : null;
         });
         let marker;
+        // Debug logging for marker logic
+        console.debug('[makeLineChart] group:', group, 'forceAIStyle:', forceAIStyle, 'forceFilledCircle:', forceFilledCircle, 'safeMarkerSymbols:', safeMarkerSymbols[group], 'legendColors:', legendColors[group]);
         if (forceAIStyle || (typeof group === 'string' && group.toLowerCase().includes('ai'))) {
             marker = {
                 size: 10,
@@ -101,16 +106,23 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 color: '#fff',
                 line: { color: legendColors[group] || '#222', width: 3 }
             };
-        } else {
+        } else if (safeMarkerSymbols[group]) {
             marker = {
                 size: 10,
-                symbol: safeMarkerSymbols[group] || 'circle',
+                symbol: safeMarkerSymbols[group],
+                color: legendColors[group] || undefined,
                 opacity: 1
             };
-            if (legendColors[group]) {
-                marker.color = (typeof legendColors[group] === 'string') ? legendColors[group].trim() : legendColors[group];
-            }
+        } else {
+            // Default: always filled circle, no outline
+            marker = {
+                size: 10,
+                symbol: 'circle',
+                color: legendColors[group] || undefined,
+                opacity: 1
+            };
         }
+        console.debug('[makeLineChart] marker for group', group, marker);
         return {
             x: xVals,
             y: yVals,

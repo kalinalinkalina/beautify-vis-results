@@ -101,7 +101,9 @@ document.addEventListener('DOMContentLoaded', function() {
         else if (comparisonType === "frequency_public") groupCol = "Public_Frequency";
         else if (comparisonType === "domain") {
             groupCol = "Domains";
-            data = explodeDomains(cleanedData, groupCol);
+            // Explode and filter out empty/nan domains before melting
+            data = explodeDomains(cleanedData, groupCol)
+                .filter(row => row[groupCol] && typeof row[groupCol] === 'string' && row[groupCol].toLowerCase() !== 'nan');
         } else if (comparisonType === "age") groupCol = "Age";
         else if (comparisonType === "tool_use") groupCol = "Tool_use";
 
@@ -318,10 +320,12 @@ document.addEventListener('DOMContentLoaded', function() {
             let groupCounts = {};
             if (groupCol) {
                 if (comparisonType === 'domain') {
-                    // For domain, explode cleanedData and count unique rows per domain
-                    let exploded = explodeDomains(cleanedData, groupCol);
+                    // For domain, explode and filter cleanedData, then count per domain
+                    let exploded = explodeDomains(cleanedData, groupCol)
+                        .filter(row => row[groupCol] && typeof row[groupCol] === 'string' && row[groupCol].toLowerCase() !== 'nan');
+                    presentGroups = Array.from(new Set(exploded.map(row => row[groupCol])));
                     presentGroups.forEach(g => {
-                        groupCounts[g] = exploded.filter(row => displayLabel(row[groupCol]) === g).length;
+                        groupCounts[g] = exploded.filter(row => row[groupCol] === g).length;
                     });
                 } else {
                     presentGroups.forEach(g => {
