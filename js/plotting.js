@@ -76,12 +76,12 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
 }
 
 /**
- * Draws a line chart using Plotly.js
+ * Draws a line chart using Plotly.js with optional confidence bands
  * @param {Object} meanScoresDict - { group: { feature: mean, ... }, ... }
  * @param {Array<string>} featureOrder - Order of features for x-axis
  * @param {Object} legendColors - { group: color, ... }
  * @param {Array<string>} legendOrder - Order of groups in legend
- * @param {Object} options - { title, legendTitle, markerSymbols }
+ * @param {Object} options - { title, legendTitle, markerSymbols, stdDevDict }
  * @param {string} containerId - DOM element id to render the plot
  */
 function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, options, containerId) {
@@ -90,6 +90,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const title = options.title || '';
     const legendTitle = options.legendTitle || '';
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
+    const stdDevDict = options.stdDevDict || null; // { group: { feature: stdDev, ... }, ... }
     // Force squares for scientist groups
     const scientistGroups = [
         'Scientist who creates vis',
@@ -106,9 +107,37 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     // Accept groupOrder (short names for data lookup) separate from legendOrder (display names)
     const groupOrder = options.groupOrder || legendOrder;
     
+    function colorToRgba(color, alpha) {
+        if (!color) {
+            return `rgba(153, 153, 153, ${alpha})`;
+        }
+        // If it's already an rgba from hexToRgba, return as is (already has alpha)
+        if (color.startsWith('rgba')) {
+            return color;
+        }
+        try {
+            const ctx = document.createElement('canvas').getContext('2d');
+            ctx.fillStyle = color;
+            const computed = ctx.fillStyle;
+            if (computed.startsWith('#')) {
+                return hexToRgba(computed, alpha);
+            }
+            if (computed.startsWith('rgb')) {
+                const rgba = computed.replace(/rgba?\(([^)]+)\)/, `rgba($1, ${alpha})`);
+                return rgba;
+            }
+        } catch (err) {
+            // Fallback to default gray if parsing fails
+        }
+        return `rgba(153, 153, 153, ${alpha})`;
+    }
+    
     // Filter out nan/null/empty group names from groupOrder
     const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
-    const traces = validGroupOrder.map(group => {
+     const lineTraces = [];
+     const bandTraces = [];
+    
+    validGroupOrder.forEach(group => {
         const groupData = meanScoresDict.hasOwnProperty(group) ? meanScoresDict[group] : {};
         const xVals = featureOrder;
         const yVals = featureOrder.map(f => {
@@ -145,21 +174,90 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 opacity: 1
             };
         }
-        return {
+        
+        // Add confidence band as a filled area
+        if (stdDevDict && stdDevDict[group]) {
+            const groupStdDev = stdDevDict[group];
+            const upperVals = featureOrder.map((f, idx) => {
+                const mean = yVals[idx];
+                const std = groupStdDev && groupStdDev.hasOwnProperty(f) ? groupStdDev[f] : null;
+                if (mean !== null && std !== null && !Number.isNaN(std)) {
+                    return mean + std;
+                }
+                return null;
+            });
+            const lowerVals = featureOrder.map((f, idx) => {
+                const mean = yVals[idx];
+                const std = groupStdDev && groupStdDev.hasOwnProperty(f) ? groupStdDev[f] : null;
+                if (mean !== null && std !== null && !Number.isNaN(std)) {
+                    return mean - std;
+                }
+                return null;
+            });
+
+            // Use the same X values as the line chart to ensure perfect alignment for 'tonexty'
+            const bandX = featureOrder;
+            const bandUpper = featureOrder.map((_, idx) => upperVals[idx] !== null ? upperVals[idx] : null);
+            const bandLower = featureOrder.map((_, idx) => lowerVals[idx] !== null ? lowerVals[idx] : null);
+
+            const lowerTrace = {
+                type: 'scatter',
+                x: bandX,
+                y: bandLower,
+                mode: 'lines',
+                line: { color: 'rgba(0,0,0,0.1)', width: 0.5 }, // Faint line instead of transparent
+                showlegend: false,
+                hoverinfo: 'none',
+                connectgaps: true,
+                legendgroup: group // Link visibility to the group
+            };
+            const upperTrace = {
+                type: 'scatter',
+                x: bandX,
+                y: bandUpper,
+                fill: 'tonexty',
+                fillcolor: colorToRgba(legendColors[group] || '#999', 0.10), // Set opacity to 10%
+                line: { color: 'rgba(0,0,0,0.1)', width: 0.5 },
+                mode: 'lines',
+                showlegend: false,
+                hoverinfo: 'none',
+                connectgaps: true,
+                legendgroup: group // Link visibility to the group
+            };
+            bandTraces.push(lowerTrace, upperTrace);
+        }
+        
+        const lineTrace = {
             x: xVals,
             y: yVals,
             name: traceNameMap[group] || group,
             mode: 'lines+markers',
             line: { color: legendColors[group] || undefined, width: 2 },
             marker: marker,
-            connectgaps: true
+            connectgaps: true,
+            legendgroup: group // Link visibility to the group
         };
+        lineTraces.push(lineTrace);
     });
-    const filteredTraces = window.filterValidTraces(traces);
-    if (filteredTraces.length === 0) return;
+
+    const traces = [...bandTraces, ...lineTraces];
+    if (bandTraces.length > 0) {
+        console.log(`makeLineChart: created ${bandTraces.length / 2} band traces`);
+    } else {
+        console.log('makeLineChart: no band traces created');
+    }
+    
+    // Temporarily bypass filterValidTraces to ensure all traces are passed to Plotly
+    const filteredTraces = traces; // Bypass filtering
+    console.log('makeLineChart: bypassed filtering, all traces passed to Plotly', filteredTraces);
+
+    if (filteredTraces.length === 0) {
+        console.error('makeLineChart: No valid traces to plot. Check data and filtering logic.');
+        return;
+    }
     
     // Build the legend category array from actual trace names (which may have counts)
-    const legendCategoryArray = filteredTraces.map(trace => trace.name);
+    const legendCategoryArray = filteredTraces.filter(trace => trace.showlegend !== false).map(trace => trace.name);
     
     let layout;
     if (sharedLayout) {
@@ -174,7 +272,8 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             })
         });
     } else {
-        const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(featureOrder, FEATURE_LABELS);
+        const xTickVals = featureOrder;
+        const xTickText = featureOrder.map(f => FEATURE_LABELS[f] || f);
         const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
         layout = {
             title,
@@ -426,6 +525,17 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
 }
 
 // Human-readable feature name mapping (should match Python FEATURE_LABELS)
+// Helper function to convert hex color to rgba
+function hexToRgba(hex, alpha) {
+    // Remove '#' if present
+    hex = hex.replace('#', '');
+    // Parse hex to RGB
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 const FEATURE_LABELS = {
     "CamPos": "Camera Position",
     "Smoothing": "Smoothing",

@@ -6,7 +6,10 @@
  * @returns {Array<Object>} filtered traces
  */
 function filterValidTraces(traces) {
-    return traces.filter(t => t.name && t.name.toLowerCase() !== 'trace');
+    return traces.filter(t => {
+        if (t.showlegend === false) return true;
+        return t.name && String(t.name).toLowerCase() !== 'trace';
+    });
 }
 
 /**

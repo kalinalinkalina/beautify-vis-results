@@ -1,3 +1,19 @@
+// Attach to window for global access
+window.generateColorScale = generateColorScale;
+
+// Utility function to generate a color scale dynamically
+function generateColorScale(legend) {
+    const colors = [
+        '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
+        '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
+    ];
+    const colorMap = {};
+    legend.forEach((item, index) => {
+        colorMap[item] = colors[index % colors.length]; // Cycle through colors if legend is longer than the palette
+    });
+    return colorMap;
+}
+
 // Entry point for dashboard logic
 // TODO: Implement data loading, cleaning, and plotting logic here
 
