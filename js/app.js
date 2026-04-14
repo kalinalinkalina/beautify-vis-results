@@ -266,7 +266,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             title: 'Acceptability of Human vs AI Alterations',
                             colorMap: { 'Human': 'peru', 'AI': 'gray' },
                             categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
-                            xaxisTitle: 'Alteration',
+                            xaxisTitle: 'Type of Alteration',
                             yaxisTitle: 'Acceptability'
                         },
                         'human-plot'
@@ -400,7 +400,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             title: `Human Acceptability by Group`,
                             colorMap: colorMap,
                             categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                            xaxisTitle: 'Alteration',
+                            xaxisTitle: 'Type of Alteration',
                             yaxisTitle: 'Acceptability',
                             legendOrder: boxPlotLegendOrder,
                             traceNameMap: groupLabelMap
@@ -416,7 +416,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             title: `AI Acceptability by Group`,
                             colorMap: colorMap,
                             categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                            xaxisTitle: 'Alteration',
+                            xaxisTitle: 'Type of Alteration',
                             yaxisTitle: 'Acceptability',
                             legendOrder: boxPlotLegendOrder,
                             traceNameMap: groupLabelMap
@@ -466,6 +466,18 @@ document.addEventListener('DOMContentLoaded', function() {
                         labelMap = GROUP_METADATA[comparisonType].labelMap;
                         colorMapRaw = GROUP_METADATA[comparisonType].colorMap;
                         order = GROUP_METADATA[comparisonType].order;
+                    }
+                    
+                    // Build colorMap from raw color map, mapping short names to colors
+                    if (labelMap && colorMapRaw) {
+                        Object.keys(labelMap).forEach(rawName => {
+                            const shortName = labelMap[rawName];
+                            if (colorMapRaw[shortName]) {
+                                colorMap[shortName] = colorMapRaw[shortName];
+                            }
+                        });
+                    } else if (colorMapRaw) {
+                        colorMap = colorMapRaw;
                     }
                     
                     // Build legend with proper order and counts
@@ -563,6 +575,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (comparisonType === 'human_ai') {
                     const humanMeans = backendData.means['Human'] || {};
                     const aiMeans = backendData.means['AI'] || {};
+                    const humanStds = backendData.stdsHuman['Human'] || {};
+                    const aiStds = backendData.stdsAI['AI'] || {};
                     // Sort features for plotting
                     const featureOrder = getFeatureSortOrder(sortBy,
                         Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
@@ -585,7 +599,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             title: 'Mean Acceptability Scores by Feature (Human vs AI)',
                             legendTitle: 'Type',
                             traceNameMap: traceNameMap,
-                            groupOrder: ['Human', 'AI']  // Data lookup keys
+                            groupOrder: ['Human', 'AI'],  // Data lookup keys
+                            stdDevDict: { 'Human': humanStds, 'AI': aiStds }
                         },
                         'human-plot'
                     );
@@ -595,6 +610,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     // --- Line chart logic for all other comparison types ---
                     let groupMeansHuman = {};
                     let groupMeansAI = {};
+                    let groupStdsHuman = {};
+                    let groupStdsAI = {};
                     let legend = backendData.groups;
                     let legendWithCounts = [];
                     let colorMap = {};
@@ -605,6 +622,18 @@ document.addEventListener('DOMContentLoaded', function() {
                         labelMap = GROUP_METADATA[comparisonType].labelMap;
                         colorMapRaw = GROUP_METADATA[comparisonType].colorMap;
                         order = GROUP_METADATA[comparisonType].order;
+                    }
+                    
+                    // Build colorMap from raw color map, mapping short names to colors
+                    if (labelMap && colorMapRaw) {
+                        Object.keys(labelMap).forEach(rawName => {
+                            const shortName = labelMap[rawName];
+                            if (colorMapRaw[shortName]) {
+                                colorMap[shortName] = colorMapRaw[shortName];
+                            }
+                        });
+                    } else if (colorMapRaw) {
+                        colorMap = colorMapRaw;
                     }
                     
                     // Build legend with proper order and counts
@@ -632,6 +661,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             
                             groupMeansHuman[shortName] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
                             groupMeansAI[shortName] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
+                            groupStdsHuman[shortName] = backendData.stdsHuman ? (backendData.stdsHuman[rawGroup] || {}) : {};
+                            groupStdsAI[shortName] = backendData.stdsAI ? (backendData.stdsAI[rawGroup] || {}) : {};
                         });
                     } else {
                         // No label mapping, but respect predefined order if available
@@ -652,22 +683,14 @@ document.addEventListener('DOMContentLoaded', function() {
                             
                             groupMeansHuman[group] = backendData.meansHuman ? (backendData.meansHuman[group] || {}) : {};
                             groupMeansAI[group] = backendData.meansAI ? (backendData.meansAI[group] || {}) : {};
+                            groupStdsHuman[group] = backendData.stdsHuman ? (backendData.stdsHuman[group] || {}) : {};
+                            groupStdsAI[group] = backendData.stdsAI ? (backendData.stdsAI[group] || {}) : {};
                         });
-                    }
-                    
-                    // Always ensure colorMap covers all legend entries
-                    legend.forEach((g, i) => {
-                        if (colorMapRaw && colorMapRaw[g]) {
-                            colorMap[g] = colorMapRaw[g];
-                        } else {
-                            const pxColors = [
-                                '#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52',
-                                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-                            ];
-                            colorMap[g] = pxColors[i % pxColors.length];
+                         if (!colorMapRaw) {
+                            colorMap = window.generateColorScale(legend);
                         }
-                    });
-                    // Sort features for plotting
+                    }
+
                     // Use meansHuman and meansAI to build arrays for getFeatureSortOrder
                     const featureOrder = getFeatureSortOrder(sortBy,
                         Object.entries(backendData.meansHuman || {}).flatMap(([Feature_Name, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v }))),
@@ -687,7 +710,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             title: `Mean Human Acceptability Scores by Feature and Group`,
                             legendTitle: 'Group',
                             traceNameMap: traceNameMap,
-                            groupOrder: legend  // Data lookup keys
+                            groupOrder: legend,  // Data lookup keys
+                            stdDevDict: groupStdsHuman
                         },
                         'human-plot'
                     );
@@ -701,7 +725,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             legendTitle: 'Group',
                             forceAIStyle: true,
                             traceNameMap: traceNameMap,
-                            groupOrder: legend  // Data lookup keys
+                            groupOrder: legend,  // Data lookup keys
+                            stdDevDict: groupStdsAI
                         },
                         'ai-plot'
                     );
@@ -759,5 +784,5 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Backend API endpoint for aggregated data
-const API_URL = 'https://script.google.com/macros/s/AKfycbwGrxU4YNudKcoCQkC4uv6YuXbghUcMcY3-i5RwV-P6YVXbdOoj7m9Mv7oQo0pUCa1A/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbyFZUv6s7QyAYjeh4U1sHg_lj-fW1SbDGQynrNZ0TYo_pluEb5Zx30G5cWPVmahG0YC/exec';
 

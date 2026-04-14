@@ -324,8 +324,8 @@ function aggregateBoxPlot(data, comparisonType, sortBy) {
   return output;
 }
 
-// --- Aggregation for Line Chart (Means) ---
-// Returns only aggregated means for line charts (never raw data)
+// --- Aggregation for Line Chart (Means and Standard Deviations) ---
+// Returns only aggregated means and standard deviations for line charts (never raw data)
 function aggregateLineChart(data, comparisonType, sortBy) {
   // Acceptability columns and mapping
   const features = [
@@ -346,6 +346,8 @@ function aggregateLineChart(data, comparisonType, sortBy) {
     means: {},
     meansHuman: {},
     meansAI: {},
+    stdsHuman: {},
+    stdsAI: {},
     groupCounts: {} // <-- add groupCounts to output
   };
 
@@ -401,11 +403,13 @@ function aggregateLineChart(data, comparisonType, sortBy) {
 
   // No feature sorting here; handled on frontend
 
-  // For each group and feature, calculate mean
+  // For each group and feature, calculate mean and standard deviation
   groups.forEach(group => {
     output.means[group] = {};
     output.meansHuman[group] = {};
     output.meansAI[group] = {};
+    output.stdsHuman[group] = {};
+    output.stdsAI[group] = {};
     features.forEach(feat => {
       let scoresHuman = [];
       let scoresAI = [];
@@ -413,9 +417,13 @@ function aggregateLineChart(data, comparisonType, sortBy) {
         if (group === 'Human') {
           scoresHuman = data.map(d => likertMap[d['Acceptability_Human_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
           output.means[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
+          output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
+          output.stdsHuman[group][feat] = scoresHuman.length ? calculateStdDev(scoresHuman) : null;
         } else {
           scoresAI = data.map(d => likertMap[d['Acceptability_AI_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
           output.means[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
+          output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
+          output.stdsAI[group][feat] = scoresAI.length ? calculateStdDev(scoresAI) : null;
         }
       } else if (comparisonType === 'domain') {
         scoresHuman = data.filter(d => (d['Domains'] || []).includes(group))
@@ -425,7 +433,9 @@ function aggregateLineChart(data, comparisonType, sortBy) {
           .map(d => likertMap[d['Acceptability_AI_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
+        output.stdsHuman[group][feat] = scoresHuman.length ? calculateStdDev(scoresHuman) : null;
         output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
+        output.stdsAI[group][feat] = scoresAI.length ? calculateStdDev(scoresAI) : null;
       } else {
         scoresHuman = data.filter(d => d[getComparisonCol(comparisonType)] === group)
           .map(d => likertMap[d['Acceptability_Human_' + feat]])
@@ -434,7 +444,9 @@ function aggregateLineChart(data, comparisonType, sortBy) {
           .map(d => likertMap[d['Acceptability_AI_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
+        output.stdsHuman[group][feat] = scoresHuman.length ? calculateStdDev(scoresHuman) : null;
         output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
+        output.stdsAI[group][feat] = scoresAI.length ? calculateStdDev(scoresAI) : null;
       }
     });
   });
@@ -580,6 +592,14 @@ function aggregateSlopeChart(data, comparisonType, sortBy) {
   });
 
   return output;
+}
+
+// --- Helper to calculate standard deviation ---
+function calculateStdDev(values) {
+  if (values.length === 0) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+  return Math.sqrt(variance);
 }
 
 // --- Helper to map comparison type to column name ---
