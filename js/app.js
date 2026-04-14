@@ -441,10 +441,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         { 'Human': 'peru', 'AI': 'gray' },
                         ['Human', 'AI'],
                         {
-                            title: 'Mean Acceptability Scores by Feature (Human vs AI)',
+                            title: 'Mean Acceptability Scores by Feature (Human ● vs AI ○)',
                             legendTitle: 'Type',
                             groupOrder: ['Human', 'AI'],
-                            isGrouped: false
+                            isGrouped: false,
+                            pairedData: backendData.pairedData || [] // Pass paired individual responses
                         },
                         'human-plot'
                     );
@@ -546,7 +547,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         colorMap,
                         legendWithCounts,
                         {
-                            title: `Mean Acceptability Scores by Feature and Group (Human ● vs AI)`,
+                            title: `Mean Acceptability Scores by Feature and Group (Human ● vs AI ○)`,
                             legendTitle: 'Group',
                             groupOrder: legend,
                             traceNameMap: traceNameMap, // Pass traceNameMap
@@ -608,5 +609,5 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Backend API endpoint for aggregated data
-const API_URL = 'https://script.google.com/macros/s/AKfycbyX_yBZrP_9zrOmt24QXSI0i44BEYxSHXHC3ojoHjk7OBLmsOu2CSlQ1O8flpzs5wOq/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbwGrxU4YNudKcoCQkC4uv6YuXbghUcMcY3-i5RwV-P6YVXbdOoj7m9Mv7oQo0pUCa1A/exec';
 

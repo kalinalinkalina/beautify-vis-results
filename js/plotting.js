@@ -223,7 +223,8 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
     const isGrouped = options.isGrouped || false;
     const groupOrder = options.groupOrder || legendOrder;
-    const traceNameMap = options.traceNameMap || {}; // Extract traceNameMap from options
+    const traceNameMap = options.traceNameMap || {};
+    const pairedData = options.pairedData || []; // Individual responses
     
     // Force squares for scientist groups
     const scientistGroups = [
@@ -236,10 +237,32 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     ];
     
     const traces = [];
-    let xCounter = 0;
+    
+    // 1. Draw individual response lines (ONLY for non-grouped Human vs AI)
+    if (!isGrouped && pairedData.length > 0) {
+        pairedData.forEach(pair => {
+            featureOrder.forEach((feature, featureIdx) => {
+                const hVal = pair.human[feature];
+                const aVal = pair.ai[feature];
+                if (hVal !== undefined && aVal !== undefined) {
+                    const humanX = featureIdx - 0.1;
+                    const aiX = featureIdx + 0.1;
+                    traces.push({
+                        x: [humanX, aiX],
+                        y: [hVal, aVal],
+                        mode: 'lines',
+                        line: { color: 'rgba(200, 200, 200, 0.3)', width: 1 },
+                        showlegend: false,
+                        hoverinfo: 'skip'
+                    });
+                }
+            });
+        });
+    }
+
     const featureXPositions = {}; // Map feature to x-axis position
     
-    // For each feature, create slope traces
+    // 2. Draw mean slopes (connected markers)
     featureOrder.forEach((feature, featureIdx) => {
         const featureX = featureIdx;
         featureXPositions[feature] = featureX;

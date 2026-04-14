@@ -381,7 +381,8 @@ function aggregateSlopeChart(data, comparisonType, sortBy) {
     groups: [],
     meansHuman: {},
     meansAI: {},
-    groupCounts: {} // <-- add groupCounts to output
+    groupCounts: {},
+    pairedData: [] // For individual responses in Human vs AI
   };
 
   // Determine groups and group counts
@@ -395,6 +396,28 @@ function aggregateSlopeChart(data, comparisonType, sortBy) {
     groupCounts['AI'] = data.filter(d => {
       return Object.keys(d).some(k => k.startsWith('Acceptability_AI_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
     }).length;
+
+    // Collect paired individual responses for Human vs AI
+    data.forEach(d => {
+      const pair = { human: {}, ai: {} };
+      let hasHuman = false;
+      let hasAI = false;
+      features.forEach(feat => {
+        const hVal = likertMap[d['Acceptability_Human_' + feat]];
+        const aVal = likertMap[d['Acceptability_AI_' + feat]];
+        if (hVal !== undefined && hVal !== null && hVal !== '') {
+          pair.human[feat] = hVal;
+          hasHuman = true;
+        }
+        if (aVal !== undefined && aVal !== null && aVal !== '') {
+          pair.ai[feat] = aVal;
+          hasAI = true;
+        }
+      });
+      if (hasHuman || hasAI) {
+        output.pairedData.push(pair);
+      }
+    });
   } else if (comparisonType === 'role') {
     groups = Array.from(new Set(data.map(d => d['Vis_Role'])));
     groups.forEach(g => {
