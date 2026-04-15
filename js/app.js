@@ -458,7 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         { 'Human': 'peru', 'AI': 'gray' },
                         ['Human', 'AI'],
                         {
-                            title: 'Mean Acceptability (Human ● vs AI ○)',
+                            title: 'Mean Acceptability (Human ● vs AI ○, individual responses shown as gray lines)',
                             legendTitle: 'Type',
                             groupOrder: ['Human', 'AI'],
                             isGrouped: false,
@@ -801,4 +801,3 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Backend API endpoint for aggregated data
 const API_URL = 'https://script.google.com/macros/s/AKfycbyFZUv6s7QyAYjeh4U1sHg_lj-fW1SbDGQynrNZ0TYo_pluEb5Zx30G5cWPVmahG0YC/exec';
-

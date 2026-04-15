@@ -376,22 +376,17 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 
                 if (humanMean === null || aiMean === null) return;
                 
-                // Offset each group's slope horizontally
-                const groupOffsetFactor = (groupIdx - (validGroupOrder.length - 1) / 2) * 0.15;
-                const humanX = featureX + groupOffsetFactor - 0.1;
-                const aiX = featureX + groupOffsetFactor + 0.1;
-                
                 // Add connecting line
                 traces.push({
-                    x: [humanX, aiX],
+                    x: [featureX - 0.1, featureX + 0.1],
                     y: [humanMean, aiMean],
                     mode: 'lines',
-                    line: { color: legendColors[group] || '#999', width: 2 },
+                    line: { color: legendColors[group] || 'peru', width: 2 }, // Use human color or default to 'peru'
                     showlegend: false,
                     hoverinfo: 'skip',
-                    name: ''
+                    legendgroup: group // Link visibility to the group
                 });
-                
+
                 // Add human marker (filled)
                 let markerSymbol = safeMarkerSymbols[group] || 'circle';
                 if (scientistGroups.includes(group)) {
@@ -400,9 +395,9 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 if (xMarkerGroups.includes(group)) {
                     markerSymbol = 'x';
                 }
-                
+
                 traces.push({
-                    x: [humanX],
+                    x: [featureX - 0.1],
                     y: [humanMean],
                     mode: 'markers',
                     marker: {
@@ -416,10 +411,10 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                     hovertemplate: `<b>${group}</b><br>Human: ${humanMean.toFixed(2)}<extra></extra>`,
                     name: traceNameMap[group] || group
                 });
-                
+
                 // Add AI marker (outlined)
                 traces.push({
-                    x: [aiX],
+                    x: [featureX + 0.1],
                     y: [aiMean],
                     mode: 'markers',
                     marker: {
@@ -429,6 +424,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                         line: { color: legendColors[group] || '#222', width: 3 }
                     },
                     showlegend: false, // Do not show AI markers in the legend
+                    legendgroup: group, // Link visibility to the group
                     hovertemplate: `<b>${group}</b><br>AI: ${aiMean.toFixed(2)}<extra></extra>`,
                     name: ''
                 });
@@ -440,6 +436,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
             
             if (humanMean === null || aiMean === null) return;
             
+            // Use fixed offsets so all groups for a given feature share the same start/end x positions
             const humanX = featureX - 0.15;
             const aiX = featureX + 0.15;
             
@@ -448,10 +445,10 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 x: [humanX, aiX],
                 y: [humanMean, aiMean],
                 mode: 'lines',
-                line: { color: '#999', width: 2 },
+                line: { color: legendColors['Human'] || 'peru', width: 2 }, // Use human color or default to 'peru'
                 showlegend: false,
                 hoverinfo: 'skip',
-                name: ''
+                legendgroup: 'human' // Link visibility to the group
             });
             
             // Add human marker (filled)
@@ -497,6 +494,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
         title,
         xaxis: {
             title: 'Type of Alteration',
+            type: 'linear',
             tickangle: 30,
             tickvals: featureOrder.map((_, i) => i),
             ticktext: xTickText,
