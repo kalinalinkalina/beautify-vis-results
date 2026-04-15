@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let meltedHuman = [];
     let meltedAI = [];
     let combinedMelted = [];
+    let backendData = null;
 
     // --- Group label, color, and order mappings ---
     const GROUP_METADATA = {
@@ -106,6 +107,17 @@ document.addEventListener('DOMContentLoaded', function() {
             colorMap: null, // handled dynamically
             order: null
         }
+    };
+
+    const COMPARISON_LABELS = {
+        human_ai: 'Human vs AI',
+        role: 'Role',
+        experience: 'Years of vis experience',
+        frequency_vis: 'Frequency of visualization',
+        frequency_public: 'Frequency of vis for public communication',
+        domain: 'Domain',
+        age: 'Age',
+        tool_use: 'Willingness to use AI tools'
     };
 
     // --- Utility: explode domains ---
@@ -578,7 +590,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         {
                             title: `Mean Acceptability (Human ● vs AI ○)`,
                             legendTitle: 'Group',
-                            groupOrder: legend,
                             traceNameMap: traceNameMap, // Pass traceNameMap
                             isGrouped: true
                         },
@@ -748,6 +759,118 @@ document.addEventListener('DOMContentLoaded', function() {
                     );
                     document.getElementById('human-plot').style.display = 'block';
                     document.getElementById('ai-plot').style.display = 'block';
+                }
+            } else if (chartType === 'swarm') {
+                const comparisonLabel = COMPARISON_LABELS[comparisonType] || comparisonType;
+                if (comparisonType === 'human_ai') {
+                    const combined = [];
+                    backendData.groups.forEach(group => {
+                        backendData.features.forEach(feat => {
+                            (backendData.data[feat][group] || []).forEach(score => {
+                                combined.push({
+                                    Feature_Name: feat,
+                                    Numerical_Score: score,
+                                    Type: group
+                                });
+                            });
+                        });
+                    });
+                    const featureOrder = getFeatureSortOrder(sortBy, combined.filter(r => r.Type === 'Human'), combined.filter(r => r.Type === 'AI'));
+                    window.makeSwarmPlot(
+                        combined,
+                        'Feature_Name',
+                        'Numerical_Score',
+                        'Type',
+                        {
+                            title: `Swarm Plot: Acceptability of Human vs AI Alterations`,
+                            colorMap: { 'Human': 'peru', 'AI': 'gray' },
+                            categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
+                            xaxisTitle: 'Type of Alteration',
+                            yaxisTitle: 'Acceptability',
+                            traceNameMap: { 'Human': 'Human', 'AI': 'AI' }
+                        },
+                        'human-plot'
+                    );
+                    document.getElementById('human-plot').style.display = 'block';
+                    document.getElementById('ai-plot').style.display = 'none';
+                } else {
+                    let combined = [];
+                    const { labelMap, colorMap, order } = getGroupMeta(comparisonType, backendData.groups);
+                    let groupKey = 'Group';
+                    let groupOrder = backendData.groups.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
+                    const traceNameMap = {};
+
+                    if (labelMap) {
+                        const shortNames = backendData.groups
+                            .filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '')
+                            .map(g => labelMap[g] || g);
+                        let orderedNames = [];
+                        if (order) {
+                            orderedNames = order.filter(name => shortNames.includes(name));
+                            shortNames.forEach(name => {
+                                if (!orderedNames.includes(name)) orderedNames.push(name);
+                            });
+                        } else {
+                            orderedNames = shortNames;
+                        }
+                        groupOrder = orderedNames;
+                        groupKey = 'ShortGroup';
+                        backendData.groups.forEach(rawGroup => {
+                            if (rawGroup === undefined || rawGroup === null || String(rawGroup).trim().toLowerCase() === 'nan' || String(rawGroup).trim() === '') return;
+                            const shortName = labelMap[rawGroup] || rawGroup;
+                            const count = backendData.groupCounts && backendData.groupCounts[rawGroup] !== undefined ? backendData.groupCounts[rawGroup] : 0;
+                            traceNameMap[shortName] = `${shortName} (${count})`;
+                        });
+                    } else {
+                        if (order) {
+                            const ordered = order.filter(name => groupOrder.includes(name));
+                            groupOrder.forEach(name => {
+                                if (!ordered.includes(name)) ordered.push(name);
+                            });
+                            groupOrder = ordered;
+                        }
+                        backendData.groups.forEach(rawGroup => {
+                            if (rawGroup === undefined || rawGroup === null || String(rawGroup).trim().toLowerCase() === 'nan' || String(rawGroup).trim() === '') return;
+                            const count = backendData.groupCounts && backendData.groupCounts[rawGroup] !== undefined ? backendData.groupCounts[rawGroup] : 0;
+                            traceNameMap[rawGroup] = `${rawGroup} (${count})`;
+                        });
+                    }
+
+                    backendData.groups.forEach(rawGroup => {
+                        if (rawGroup === undefined || rawGroup === null || String(rawGroup).trim().toLowerCase() === 'nan' || String(rawGroup).trim() === '') return;
+                        const shortName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
+                        backendData.features.forEach(feat => {
+                            const values = (backendData.data[feat] && backendData.data[feat][rawGroup]) ? backendData.data[feat][rawGroup] : [];
+                            values.forEach(score => {
+                                const entry = {
+                                    Feature_Name: feat,
+                                    Numerical_Score: score,
+                                    Group: rawGroup,
+                                    ShortGroup: shortName
+                                };
+                                combined.push(entry);
+                            });
+                        });
+                    });
+
+                    const featureOrder = getFeatureSortOrder(sortBy, combined, []);
+                    window.makeSwarmPlot(
+                        combined,
+                        'Feature_Name',
+                        'Numerical_Score',
+                        groupKey,
+                        {
+                            title: `Swarm Plot: Acceptability of Human Alterations by ${comparisonLabel}`,
+                            colorMap: colorMap || window.generateColorScale(groupOrder),
+                            categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                            xaxisTitle: 'Type of Alteration',
+                            yaxisTitle: 'Acceptability',
+                            traceNameMap: traceNameMap
+                        },
+                        'human-plot'
+                    );
+                    document.getElementById('human-plot').style.display = 'block';
+                    document.getElementById('ai-plot').style.display = 'none';
                 }
             } else {
                 document.getElementById('human-plot').innerHTML = '<div style="text-align:center;padding:2em;">Not implemented yet.</div>';

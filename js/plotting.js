@@ -505,7 +505,9 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
             tickmode: 'array',
             tickvals: yTickVals,
             ticktext: yTickText,
-            range: [-0.5, 5.5]
+            range: [-0.5, 5.5],
+            scaleanchor: 'x',
+            scaleratio: 1
         },
         legend: {
             orientation: 'v',
@@ -520,6 +522,113 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     };
     
     Plotly.newPlot(containerId, traces, layout, {responsive: true});
+}
+
+/**
+ * Draws a scatter-based swarm plot using Plotly.js
+ * @param {Array<Object>} data - Data array
+ * @param {string} x - X axis field (e.g., 'Feature_Name')
+ * @param {string} y - Y axis field (e.g., 'Numerical_Score')
+ * @param {string} group - Field for grouping (e.g., 'Type')
+ * @param {Object} options - { title, colorMap, categoryOrders, xaxisTitle, yaxisTitle }
+ * @param {string} containerId - DOM element id to render the plot
+ */
+function makeSwarmPlot(data, x, y, group, options, containerId) {
+    options = options || {};
+    const {
+        title = '',
+        colorMap = {},
+        categoryOrders = {},
+        xaxisTitle = '',
+        yaxisTitle = '',
+        traceNameMap = {},
+        jitterAmplitude = 0.54,
+        markerSize = 7,
+        markerOpacity = 0.65
+    } = options;
+
+    const featureOrder = categoryOrders[x] || [...new Set(data.map(row => row[x]))];
+    const groupOrder = categoryOrders[group] || [...new Set(data.map(row => row[group]))];
+
+    const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
+    let drawOrder = validGroupOrder;
+    let legendTraceOrder = 'normal';
+    if (group === 'Type' && validGroupOrder.includes('Human') && validGroupOrder.includes('AI')) {
+        drawOrder = validGroupOrder.filter(g => g !== 'Human');
+        drawOrder.push('Human');
+        legendTraceOrder = 'reversed';
+    }
+    const traces = [];
+
+    drawOrder.forEach((groupName, index) => {
+        const groupData = data.filter(row => row[group] === groupName);
+        if (!groupData.length) return;
+
+        const xVals = groupData.map(row => {
+            const idx = featureOrder.indexOf(row[x]);
+            const jitter = (Math.random() - 0.5) * jitterAmplitude;
+            return idx + jitter;
+        });
+        const yVals = groupData.map(row => {
+            const jitterY = (Math.random() - 0.5) * jitterAmplitude;
+            return row[y] + jitterY;
+        });
+        const textLabels = groupData.map(row => FEATURE_LABELS[row[x]] || row[x]);
+        const traceName = traceNameMap[groupName] || groupName;
+
+        traces.push({
+            x: xVals,
+            y: yVals,
+            mode: 'markers',
+            type: 'scatter',
+            name: traceName,
+            marker: {
+                size: markerSize,
+                color: colorMap[groupName] || undefined,
+                opacity: markerOpacity,
+                line: { width: 1, color: '#333' }
+            },
+            text: textLabels,
+            hovertemplate: `<b>${traceName}</b><br>%{text}<br>Acceptability: %{y}<extra></extra>`,
+            legendgroup: traceName,
+            showlegend: true
+        });
+    });
+
+    const xTickText = featureOrder.map(f => FEATURE_LABELS[f] || f);
+    const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
+    const layout = {
+        title,
+        xaxis: {
+            title: xaxisTitle,
+            type: 'linear',
+            tickmode: 'array',
+            tickvals: featureOrder.map((_, i) => i),
+            ticktext: xTickText,
+            tickangle: 30,
+            range: [-0.5, featureOrder.length - 0.5]
+        },
+        yaxis: {
+            title: yaxisTitle,
+            tickmode: 'array',
+            tickvals: yTickVals,
+            ticktext: yTickText,
+            range: [-0.5, 5.5],
+            scaleanchor: 'x',
+            scaleratio: 1
+        },
+        legend: {
+            orientation: 'v',
+            x: 1,
+            xanchor: 'left',
+            y: 1,
+            yanchor: 'top',
+            traceorder: legendTraceOrder
+        },
+        margin: { r: 180 },
+        hovermode: 'closest'
+    };
+    Plotly.newPlot(containerId, traces, layout, { responsive: true });
 }
 
 // Human-readable feature name mapping (should match Python FEATURE_LABELS)
@@ -557,5 +666,6 @@ if (typeof window !== 'undefined') {
     window.makeBoxPlot = makeBoxPlot;
     window.makeLineChart = makeLineChart;
     window.makeSlopeChart = makeSlopeChart;
+    window.makeSwarmPlot = makeSwarmPlot;
     window.FEATURE_LABELS = FEATURE_LABELS;
 }
