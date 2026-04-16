@@ -137,6 +137,8 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
     features: features,
     groups: [],
     data: {},
+    dataHuman: {},
+    dataAI: {},
     humanGroups: [],
     aiGroups: [],
     groupCounts: {}
@@ -144,16 +146,33 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
 
   let groups = [];
   let groupCounts = {};
+  let groupCol = null;
   if (comparisonType === 'human_ai') {
     groups = ['Human', 'AI'];
     groupCounts = { 'Human': data.length, 'AI': data.length };
   } else {
-    const uniqueGroups = [...new Set(data.map(row => row[comparisonType]))];
-    groups = uniqueGroups.filter(g => g); // Filter out empty/null groups
-    groupCounts = groups.reduce((acc, group) => {
-      acc[group] = data.filter(row => row[comparisonType] === group).length;
-      return acc;
-    }, {});
+    groupCol = getComparisonCol(comparisonType);
+    if (groupCol === 'Domains') {
+      const exploded = [].concat(...data.map(row => {
+        const domains = row[groupCol] || [];
+        if (Array.isArray(domains)) {
+          return domains.map(domain => ({ ...row, [groupCol]: domain }));
+        }
+        return [{ ...row }];
+      }));
+      groups = Array.from(new Set(exploded.map(row => row[groupCol]))).filter(g => g);
+      groupCounts = groups.reduce((acc, group) => {
+        acc[group] = exploded.filter(row => row[groupCol] === group).length;
+        return acc;
+      }, {});
+      data = exploded;
+    } else {
+      groups = Array.from(new Set(data.map(row => row[groupCol]))).filter(g => g);
+      groupCounts = groups.reduce((acc, group) => {
+        acc[group] = data.filter(row => row[groupCol] === group).length;
+        return acc;
+      }, {});
+    }
   }
 
   output.groups = groups;
@@ -170,8 +189,12 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
   // Initialize data structure
   features.forEach(feature => {
     output.data[feature] = {};
+    output.dataHuman[feature] = {};
+    output.dataAI[feature] = {};
     groups.forEach(group => {
-      output.data[feature][group] = []; // Store individual points
+      output.data[feature][group] = [];
+      output.dataHuman[feature][group] = [];
+      output.dataAI[feature][group] = [];
     });
   });
 
@@ -181,22 +204,34 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
       if (comparisonType === 'human_ai') {
         const humanVal = likertMap[row[`Acceptability_Human_${feature}`]];
         const aiVal = likertMap[row[`Acceptability_AI_${feature}`]];
-        if (humanVal !== undefined) output.data[feature]['Human'].push(humanVal);
-        if (aiVal !== undefined) output.data[feature]['AI'].push(aiVal);
+        if (humanVal !== undefined) {
+          output.data[feature]['Human'].push(humanVal);
+          output.dataHuman[feature]['Human'].push(humanVal);
+        }
+        if (aiVal !== undefined) {
+          output.data[feature]['AI'].push(aiVal);
+          output.dataAI[feature]['AI'].push(aiVal);
+        }
       } else {
-        const group = row[comparisonType];
+        const group = row[groupCol];
         if (groups.includes(group)) {
           const humanVal = likertMap[row[`Acceptability_Human_${feature}`]];
-          if (humanVal !== undefined) output.data[feature][group].push(humanVal);
+          const aiVal = likertMap[row[`Acceptability_AI_${feature}`]];
+          if (humanVal !== undefined) {
+            output.data[feature][group].push(humanVal);
+            output.dataHuman[feature][group].push(humanVal);
+          }
+          if (aiVal !== undefined) {
+            output.dataAI[feature][group].push(aiVal);
+          }
         }
       }
     });
   });
 
-  // Sorting (if applicable, though less common for swarm plots)
-  // This part is complex for swarm plots and might not be needed.
-  // If sorting is required, it would likely be based on the median or mean of the points.
-  // For now, we'll keep the original feature order.
+  if (comparisonType !== 'human_ai') {
+    output.data = output.dataHuman;
+  }
 
   return output;
 }

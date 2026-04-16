@@ -794,7 +794,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('human-plot').style.display = 'block';
                     document.getElementById('ai-plot').style.display = 'none';
                 } else {
-                    let combined = [];
+                    const combinedHuman = [];
+                    const combinedAI = [];
                     const { labelMap, colorMap, order } = getGroupMeta(comparisonType, backendData.groups);
                     let groupKey = 'Group';
                     let groupOrder = backendData.groups.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
@@ -840,22 +841,30 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (rawGroup === undefined || rawGroup === null || String(rawGroup).trim().toLowerCase() === 'nan' || String(rawGroup).trim() === '') return;
                         const shortName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
                         backendData.features.forEach(feat => {
-                            const values = (backendData.data[feat] && backendData.data[feat][rawGroup]) ? backendData.data[feat][rawGroup] : [];
-                            values.forEach(score => {
-                                const entry = {
+                            const valuesH = (backendData.dataHuman[feat] && backendData.dataHuman[feat][rawGroup]) ? backendData.dataHuman[feat][rawGroup] : [];
+                            valuesH.forEach(score => {
+                                combinedHuman.push({
                                     Feature_Name: feat,
                                     Numerical_Score: score,
                                     Group: rawGroup,
                                     ShortGroup: shortName
-                                };
-                                combined.push(entry);
+                                });
+                            });
+                            const valuesA = (backendData.dataAI[feat] && backendData.dataAI[feat][rawGroup]) ? backendData.dataAI[feat][rawGroup] : [];
+                            valuesA.forEach(score => {
+                                combinedAI.push({
+                                    Feature_Name: feat,
+                                    Numerical_Score: score,
+                                    Group: rawGroup,
+                                    ShortGroup: shortName
+                                });
                             });
                         });
                     });
 
-                    const featureOrder = getFeatureSortOrder(sortBy, combined, []);
+                    const featureOrder = getFeatureSortOrder(sortBy, combinedHuman, combinedAI);
                     window.makeSwarmPlot(
-                        combined,
+                        combinedHuman,
                         'Feature_Name',
                         'Numerical_Score',
                         groupKey,
@@ -869,8 +878,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         },
                         'human-plot'
                     );
+                    window.makeSwarmPlot(
+                        combinedAI,
+                        'Feature_Name',
+                        'Numerical_Score',
+                        groupKey,
+                        {
+                            title: `Swarm Plot: Acceptability of AI Alterations by ${comparisonLabel}`,
+                            colorMap: colorMap || window.generateColorScale(groupOrder),
+                            categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                            xaxisTitle: 'Type of Alteration',
+                            yaxisTitle: 'Acceptability',
+                            traceNameMap: traceNameMap
+                        },
+                        'ai-plot'
+                    );
                     document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'none';
+                    document.getElementById('ai-plot').style.display = 'block';
                 }
             } else {
                 document.getElementById('human-plot').innerHTML = '<div style="text-align:center;padding:2em;">Not implemented yet.</div>';
@@ -878,13 +902,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('ai-plot').style.display = 'none';
             }
         } catch (err) {
-            document.getElementById('human-plot').innerHTML = `<div style=\"color:red;text-align:center;padding:2em;\">Error: ${err.message}</div>`;
+            document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">Error updating plots: ${err.message}</div>`;
             document.getElementById('human-plot').style.display = 'block';
             document.getElementById('ai-plot').style.display = 'none';
-            console.error(err);
         }
     }
-
 
     // --- Fetch aggregated data from backend ---
     async function fetchAggregatedData() {
@@ -923,4 +945,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Backend API endpoint for aggregated data
-const API_URL = 'https://script.google.com/macros/s/AKfycbyFZUv6s7QyAYjeh4U1sHg_lj-fW1SbDGQynrNZ0TYo_pluEb5Zx30G5cWPVmahG0YC/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbxkS_1zbPPw0uWhnp6abeclW4rKhWqMc06MjiC83YqHa-lcVjMMEOHuPl9ch-Zga-Gb/exec';
