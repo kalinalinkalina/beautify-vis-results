@@ -371,8 +371,8 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
             const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
             
             validGroupOrder.forEach((group, groupIdx) => {
-                const humanMean = meanScoresDict[group] && meanScoresDict[group][feature] ? meanScoresDict[group][feature] : null;
-                const aiMean = meanScoresDictAI[group] && meanScoresDictAI[group][feature] ? meanScoresDictAI[group][feature] : null;
+                const humanMean = meanScoresDict[group] && meanScoresDict[group][feature] != null ? meanScoresDict[group][feature] : null;
+                const aiMean = meanScoresDictAI[group] && meanScoresDictAI[group][feature] != null ? meanScoresDictAI[group][feature] : null;
                 
                 if (humanMean === null || aiMean === null) return;
                 
@@ -431,8 +431,8 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
             });
         } else {
             // For human_ai comparison: single slope per feature
-            const humanMean = meanScoresDict['Human'] && meanScoresDict['Human'][feature] ? meanScoresDict['Human'][feature] : null;
-            const aiMean = meanScoresDictAI['AI'] && meanScoresDictAI['AI'][feature] ? meanScoresDictAI['AI'][feature] : null;
+            const humanMean = meanScoresDict['Human'] && meanScoresDict['Human'][feature] != null ? meanScoresDict['Human'][feature] : null;
+            const aiMean = meanScoresDictAI['AI'] && meanScoresDictAI['AI'][feature] != null ? meanScoresDictAI['AI'][feature] : null;
             
             if (humanMean === null || aiMean === null) return;
             
@@ -583,6 +583,11 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
             type: 'scatter',
             name: traceName,
             marker: {
+                symbol: ((group === 'ShortGroup' && ['Scientist who creates vis', 'Scientist who uses vis'].includes(groupName)) ||
+                         (group === 'Group' && [
+                             'I create visualizations to help me in my primary role, which is not visualization-related',
+                             'I work with visualizations created by others, but I do not create or research visualization myself'
+                         ].includes(groupName))) ? 'square' : 'circle',
                 size: markerSize,
                 color: colorMap[groupName] || undefined,
                 opacity: markerOpacity,

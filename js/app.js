@@ -256,13 +256,42 @@ document.addEventListener('DOMContentLoaded', function() {
         return columns.every(col => col in data[0]);
     }
 
+    // --- Utility: set plot visibility before rendering ---
+    function setPlotVisibility(humanVisible, aiVisible) {
+        const humanPlot = document.getElementById('human-plot');
+        const aiPlot = document.getElementById('ai-plot');
+        if (humanPlot) humanPlot.style.display = humanVisible ? 'block' : 'none';
+        if (aiPlot) aiPlot.style.display = aiVisible ? 'block' : 'none';
+    }
+
+    // --- Utility: resize plots after rendering so visible charts match their container width ---
+    function resizeVisiblePlots() {
+        ['human-plot', 'ai-plot'].forEach(id => {
+            const plotEl = document.getElementById(id);
+            if (plotEl && plotEl.offsetWidth > 0) {
+                try {
+                    Plotly.Plots.resize(plotEl);
+                } catch (err) {
+                    // ignore if plot is not initialized yet
+                }
+            }
+        });
+    }
+
     // --- Main plot update logic ---
     function updatePlots() {
         const { chartType, comparisonType, sortBy } = getSelections();
+        // Determine which containers should be visible for the selected chart type
+        let showHumanPlot = true;
+        let showAIPlot = false;
+        if (chartType === 'box' || chartType === 'line' || chartType === 'swarm') {
+            showAIPlot = comparisonType !== 'human_ai';
+        }
+        setPlotVisibility(showHumanPlot, showAIPlot);
+
         // Defensive: try/catch for main logic
         try {
             // --- Use backendData structure only ---
-            const { chartType, comparisonType } = getSelections();
             if (!backendData) {
                 document.getElementById('human-plot').innerHTML = '<div style="color:red;text-align:center;padding:2em;">No data loaded from backend.</div>';
                 document.getElementById('human-plot').style.display = 'block';
@@ -588,9 +617,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         colorMap,
                         legendWithCounts,
                         {
-                            title: `Mean Acceptability (Human ● vs AI ○)`,
+                            title: `Mean Acceptability (Human \u25cf vs AI \u25cb)`,
                             legendTitle: 'Group',
                             traceNameMap: traceNameMap, // Pass traceNameMap
+                            groupOrder: legend,
                             isGrouped: true
                         },
                         'human-plot'
@@ -730,9 +760,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                     window.makeLineChart(
                         groupMeansHuman,
+                        groupMeansAI,
                         featureOrder,
                         colorMap,
-                        legendWithCounts, // Pass legend labels WITH counts as legendOrder for display
+                        legendWithCounts,
                         {
                             title: `Mean Acceptability for Human Alteration (±1 Stdev Bands)`,
                             legendTitle: 'Group',
@@ -901,6 +932,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('human-plot').style.display = 'block';
                 document.getElementById('ai-plot').style.display = 'none';
             }
+            resizeVisiblePlots();
         } catch (err) {
             document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">Error updating plots: ${err.message}</div>`;
             document.getElementById('human-plot').style.display = 'block';
