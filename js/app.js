@@ -46,10 +46,6 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // --- State ---
-    let cleanedData = [];
-    let meltedHuman = [];
-    let meltedAI = [];
-    let combinedMelted = [];
     let backendData = null;
 
     // --- Group label, color, and order mappings ---
@@ -119,35 +115,6 @@ document.addEventListener('DOMContentLoaded', function() {
         age: 'Age',
         tool_use: 'Willingness to use AI tools'
     };
-
-    // --- Utility: explode domains ---
-    function explodeDomains(data, domainsCol = "Domains") {
-        return window.preprocessDomainsColumn(data, domainsCol);
-    }
-
-    // --- Utility: group and melt data by comparison type ---
-    function prepareGroupedData(cleanedData, comparisonType, humanAcceptabilityCols, aiAcceptabilityCols, likertMapping) {
-        let groupCol = null;
-        let data = cleanedData;
-        if (comparisonType === "role") groupCol = "Vis_Role";
-        else if (comparisonType === "experience") groupCol = "Vis_Length";
-        else if (comparisonType === "frequency_vis") groupCol = "Vis_Frequency";
-        else if (comparisonType === "frequency_public") groupCol = "Public_Frequency";
-        else if (comparisonType === "domain") {
-            groupCol = "Domains";
-            // Explode and filter out empty/nan domains before melting
-            data = explodeDomains(cleanedData, groupCol)
-                .filter(row => row[groupCol] && typeof row[groupCol] === 'string' && row[groupCol].toLowerCase() !== 'nan');
-        } else if (comparisonType === "age") groupCol = "Age";
-        else if (comparisonType === "tool_use") groupCol = "Tool_use";
-
-        // Melt and map
-        const meltedHuman = window.meltAndMapAcceptability(data, humanAcceptabilityCols, likertMapping, 'Acceptability_Human_', groupCol);
-        meltedHuman.forEach(r => r.Type = 'Human');
-        const meltedAI = window.meltAndMapAcceptability(data, aiAcceptabilityCols, likertMapping, 'Acceptability_AI_', groupCol);
-        meltedAI.forEach(r => r.Type = 'AI');
-        return { meltedHuman, meltedAI, groupCol };
-    }
 
     // --- Utility: get current dropdown values ---
     function getSelections() {
@@ -248,12 +215,6 @@ document.addEventListener('DOMContentLoaded', function() {
             order.forEach((g, i) => { colorMap[g] = pxColors[i % pxColors.length]; });
         }
         return { labelMap, colorMap, order };
-    }
-
-    // --- Utility: check required columns exist ---
-    function checkColumnsExist(data, columns) {
-        if (!data.length) return false;
-        return columns.every(col => col in data[0]);
     }
 
     // --- Utility: set plot visibility before rendering ---
@@ -760,7 +721,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                     window.makeLineChart(
                         groupMeansHuman,
-                        groupMeansAI,
                         featureOrder,
                         colorMap,
                         legendWithCounts,

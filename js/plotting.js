@@ -1,3 +1,12 @@
+function resolvePlotContainer(container) {
+    const plotContainer = typeof container === 'string' ? document.getElementById(container) : container;
+    if (!plotContainer || typeof plotContainer.getAttribute !== 'function') {
+        console.error('Invalid Plotly container:', container, plotContainer);
+        return null;
+    }
+    return plotContainer;
+}
+
 // Plotting utilities for dashboard (using Plotly.js)
 
 /**
@@ -72,7 +81,9 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
     };
     const filteredTraces = window.filterValidTraces(sortedTraces);
     if (filteredTraces.length === 0) return;
-    Plotly.newPlot(containerId, filteredTraces, layout, {responsive: true});
+    const plotContainer = resolvePlotContainer(containerId);
+    if (!plotContainer) return;
+    Plotly.newPlot(plotContainer, filteredTraces, layout, {responsive: true});
 }
 
 /**
@@ -106,6 +117,8 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const traceNameMap = options.traceNameMap || {};
     // Accept groupOrder (short names for data lookup) separate from legendOrder (display names)
     const groupOrder = options.groupOrder || legendOrder;
+    featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
+    const pairedData = options.pairedData || []; // Individual responses
     
     function colorToRgba(color, alpha) {
         if (!color) {
@@ -133,7 +146,8 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     }
     
     // Filter out nan/null/empty group names from groupOrder
-    const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
+    const safeGroupOrder = Array.isArray(groupOrder) ? groupOrder : (groupOrder && typeof groupOrder === 'object' ? Object.values(groupOrder) : []);
+    const validGroupOrder = safeGroupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
      const lineTraces = [];
      const bandTraces = [];
     
@@ -241,20 +255,9 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     });
 
     const traces = [...bandTraces, ...lineTraces];
-    if (bandTraces.length > 0) {
-        console.log(`makeLineChart: created ${bandTraces.length / 2} band traces`);
-    } else {
-        console.log('makeLineChart: no band traces created');
-    }
     
     // Temporarily bypass filterValidTraces to ensure all traces are passed to Plotly
     const filteredTraces = traces; // Bypass filtering
-    console.log('makeLineChart: bypassed filtering, all traces passed to Plotly', filteredTraces);
-
-    if (filteredTraces.length === 0) {
-        console.error('makeLineChart: No valid traces to plot. Check data and filtering logic.');
-        return;
-    }
     
     // Build the legend category array from actual trace names (which may have counts)
     const legendCategoryArray = filteredTraces.filter(trace => trace.showlegend !== false).map(trace => trace.name);
@@ -301,7 +304,9 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             margin: { r: 180 }
         };
     }
-    Plotly.newPlot(containerId, filteredTraces, layout, {responsive: true});
+    const plotContainer = resolvePlotContainer(containerId);
+    if (!plotContainer) return;
+    Plotly.newPlot(plotContainer, filteredTraces, layout, {responsive: true});
 }
 
 /**
@@ -322,6 +327,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
     const isGrouped = options.isGrouped || false;
     const groupOrder = options.groupOrder || legendOrder;
+    featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
     const traceNameMap = options.traceNameMap || {};
     const pairedData = options.pairedData || []; // Individual responses
     
@@ -368,7 +374,8 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
         
         if (isGrouped) {
             // For grouped comparisons: create separate slopes for each group
-            const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
+            const safeGroupOrder = Array.isArray(groupOrder) ? groupOrder : (groupOrder && typeof groupOrder === 'object' ? Object.values(groupOrder) : []);
+            const validGroupOrder = safeGroupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
             
             validGroupOrder.forEach((group, groupIdx) => {
                 const humanMean = meanScoresDict[group] && meanScoresDict[group][feature] != null ? meanScoresDict[group][feature] : null;
@@ -520,8 +527,9 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
         margin: { r: 180 },
         hovermode: 'closest'
     };
-    
-    Plotly.newPlot(containerId, traces, layout, {responsive: true});
+    const plotContainer = resolvePlotContainer(containerId);
+    if (!plotContainer) return;
+    Plotly.newPlot(plotContainer, traces, layout, {responsive: true});
 }
 
 /**
@@ -547,8 +555,10 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         markerOpacity = 0.65
     } = options;
 
-    const featureOrder = categoryOrders[x] || [...new Set(data.map(row => row[x]))];
-    const groupOrder = categoryOrders[group] || [...new Set(data.map(row => row[group]))];
+    const rawFeatureOrder = categoryOrders[x] || [...new Set(data.map(row => row[x]))];
+    const featureOrder = Array.isArray(rawFeatureOrder) ? rawFeatureOrder : (rawFeatureOrder && typeof rawFeatureOrder === 'object' ? Object.values(rawFeatureOrder) : [rawFeatureOrder]);
+    const rawGroupOrder = categoryOrders[group] || [...new Set(data.map(row => row[group]))];
+    const groupOrder = Array.isArray(rawGroupOrder) ? rawGroupOrder : (rawGroupOrder && typeof rawGroupOrder === 'object' ? Object.values(rawGroupOrder) : [rawGroupOrder]);
 
     const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
     let drawOrder = validGroupOrder;
@@ -633,7 +643,9 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         margin: { r: 180 },
         hovermode: 'closest'
     };
-    Plotly.newPlot(containerId, traces, layout, { responsive: true });
+    const plotContainer = resolvePlotContainer(containerId);
+    if (!plotContainer) return;
+    Plotly.newPlot(plotContainer, traces, layout, { responsive: true });
 }
 
 // Human-readable feature name mapping (should match Python FEATURE_LABELS)
