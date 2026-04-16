@@ -1,3 +1,14 @@
+function isScientistGroup(group) {
+    if (typeof group !== 'string') return false;
+    const normalized = group.trim().toLowerCase();
+    return [
+        'scientist who creates vis',
+        'scientist who uses vis',
+        'i create visualizations to help me in my primary role, which is not visualization-related',
+        'i work with visualizations created by others, but i do not create or research visualization myself'
+    ].includes(normalized);
+}
+
 function resolvePlotContainer(container) {
     const plotContainer = typeof container === 'string' ? document.getElementById(container) : container;
     if (!plotContainer || typeof plotContainer.getAttribute !== 'function') {
@@ -160,7 +171,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
         });
         let markerSymbol = safeMarkerSymbols[group] || 'circle';
         // Force squares for scientist groups
-        if (scientistGroups.includes(group)) {
+        if (isScientistGroup(group)) {
             markerSymbol = 'square';
         }
         // Force X for Never group
@@ -396,7 +407,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
 
                 // Add human marker (filled)
                 let markerSymbol = safeMarkerSymbols[group] || 'circle';
-                if (scientistGroups.includes(group)) {
+                if (isScientistGroup(group)) {
                     markerSymbol = 'square';
                 }
                 if (xMarkerGroups.includes(group)) {
