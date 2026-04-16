@@ -55,9 +55,53 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// --- Data Cleaning ---
-// This function processes and cleans the raw spreadsheet data, but only for use in aggregation.
-// No raw data is ever returned to the client.
+// --- Shared aggregation metadata ---
+const FEATURES = [
+  'Smoothing', 'Textures', 'CamPos', 'Blur', 'Details', 'Errors',
+  'FeatureAddition', 'FeatureOmission', 'Gaps', 'Shape', 'Lighting',
+  'BgItems', 'BgImage', 'Position', 'Color'
+];
+
+const LIKERT_MAP = {
+  'Never acceptable': 0, 'Rarely acceptable': 1, 'Sometimes acceptable': 2,
+  'Often acceptable': 3, 'Usually acceptable': 4, 'Always acceptable': 5,
+  0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5
+};
+
+const COMPARISON_CONFIG = {
+  human_ai: { column: null, label: 'Human vs AI' },
+  role: { column: 'Vis_Role', label: 'Role' },
+  experience: { column: 'Vis_Length', label: 'Years of vis experience' },
+  frequency_vis: { column: 'Vis_Frequency', label: 'Frequency of visualization' },
+  frequency_public: { column: 'Public_Frequency', label: 'Frequency of vis for public communication' },
+  domain: { column: 'Domains', label: 'Domain' },
+  age: { column: 'Age', label: 'Age' },
+  tool_use: { column: 'Tool_use', label: 'Would use an AI tool for beautification' }
+};
+
+function getComparisonColumn(comparisonType) {
+  return (COMPARISON_CONFIG[comparisonType] && COMPARISON_CONFIG[comparisonType].column) || comparisonType;
+}
+
+function getComparisonLabel(comparisonType) {
+  return (COMPARISON_CONFIG[comparisonType] && COMPARISON_CONFIG[comparisonType].label) || comparisonType;
+}
+
+/**
+ * API Documentation:
+ *
+ * GET endpoint (doGet):
+ *   - chartType: 'box', 'line', or 'slope'
+ *   - comparisonType: 'human_ai', 'role', 'experience', 'frequency_vis', 'frequency_public', 'domain', 'age', 'tool_use'
+ *   - sortBy: (optional, for future use)
+ *
+ * Returns:
+ *   For 'box': { features, groups, data } (aggregated scores per group/feature)
+ *   For 'line': { features, groups, means } (mean scores per group/feature)
+ *   For 'slope': { features, groups, meansHuman, meansAI } (mean scores for both human and AI)
+ *
+ * This API will NEVER return raw or row-level data, in compliance with IRB requirements.
+ */
 function cleanData(values) {
   const header = values[0];
   const rows = values.slice(1);
@@ -122,19 +166,8 @@ function cleanData(values) {
 
 // --- Aggregation for Swarm Plot ---
 function aggregateSwarmPlot(data, comparisonType, sortBy) {
-  const features = [
-    'Smoothing', 'Textures', 'CamPos', 'Blur', 'Details', 'Errors',
-    'FeatureAddition', 'FeatureOmission', 'Gaps', 'Shape', 'Lighting',
-    'BgItems', 'BgImage', 'Position', 'Color'
-  ];
-  const likertMap = {
-    "Never acceptable": 0, "Rarely acceptable": 1, "Sometimes acceptable": 2,
-    "Often acceptable": 3, "Usually acceptable": 4, "Always acceptable": 5,
-    0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5
-  };
-
   const output = {
-    features: features,
+    features: FEATURES,
     groups: [],
     data: {},
     dataHuman: {},
@@ -151,7 +184,7 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
     groups = ['Human', 'AI'];
     groupCounts = { 'Human': data.length, 'AI': data.length };
   } else {
-    groupCol = getComparisonCol(comparisonType);
+    groupCol = getComparisonColumn(comparisonType);
     if (groupCol === 'Domains') {
       const exploded = [].concat(...data.map(row => {
         const domains = row[groupCol] || [];
@@ -182,12 +215,12 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
     output.humanGroups = ['Human'];
     output.aiGroups = ['AI'];
   } else {
-    output.humanGroups = groups;
-    output.aiGroups = [];
+    output.humanGroups = groups.slice();
+    output.aiGroups = groups.slice();
   }
 
   // Initialize data structure
-  features.forEach(feature => {
+  FEATURES.forEach(feature => {
     output.data[feature] = {};
     output.dataHuman[feature] = {};
     output.dataAI[feature] = {};
@@ -200,10 +233,10 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
 
   // Populate data
   data.forEach(row => {
-    features.forEach(feature => {
+    FEATURES.forEach(feature => {
       if (comparisonType === 'human_ai') {
-        const humanVal = likertMap[row[`Acceptability_Human_${feature}`]];
-        const aiVal = likertMap[row[`Acceptability_AI_${feature}`]];
+        const humanVal = LIKERT_MAP[row[`Acceptability_Human_${feature}`]];
+        const aiVal = LIKERT_MAP[row[`Acceptability_AI_${feature}`]];
         if (humanVal !== undefined) {
           output.data[feature]['Human'].push(humanVal);
           output.dataHuman[feature]['Human'].push(humanVal);
@@ -215,8 +248,8 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
       } else {
         const group = row[groupCol];
         if (groups.includes(group)) {
-          const humanVal = likertMap[row[`Acceptability_Human_${feature}`]];
-          const aiVal = likertMap[row[`Acceptability_AI_${feature}`]];
+          const humanVal = LIKERT_MAP[row[`Acceptability_Human_${feature}`]];
+          const aiVal = LIKERT_MAP[row[`Acceptability_AI_${feature}`]];
           if (humanVal !== undefined) {
             output.data[feature][group].push(humanVal);
             output.dataHuman[feature][group].push(humanVal);
@@ -239,21 +272,9 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
 // --- Aggregation for Box Plot ---
 // Returns only aggregated data for box plots (never raw data)
 function aggregateBoxPlot(data, comparisonType, sortBy) {
-  // Acceptability columns and mapping
-  const features = [
-    'Smoothing', 'Textures', 'CamPos', 'Blur', 'Details', 'Errors',
-    'FeatureAddition', 'FeatureOmission', 'Gaps', 'Shape', 'Lighting',
-    'BgItems', 'BgImage', 'Position', 'Color'
-  ];
-  const likertMap = {
-    "Never acceptable": 0, "Rarely acceptable": 1, "Sometimes acceptable": 2,
-    "Often acceptable": 3, "Usually acceptable": 4, "Always acceptable": 5,
-    0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 // In case already mapped
-  };
-
   // Prepare output structure
   const output = {
-    features: features,
+    features: FEATURES,
     groups: [],
     data: {},
     humanGroups: [],
@@ -262,86 +283,52 @@ function aggregateBoxPlot(data, comparisonType, sortBy) {
   };
 
   // Determine groups and group counts
-  let groups = [];
-  let groupCounts = {};
+  const groupsAndCounts = getGroupsAndCounts(data, comparisonType);
+  const groups = groupsAndCounts.groups;
+  const groupCounts = groupsAndCounts.groupCounts;
+  output.groups = groups;
+  output.groupCounts = groupCounts;
   if (comparisonType === 'human_ai') {
-    groups = ['Human', 'AI'];
     output.humanGroups = ['Human'];
     output.aiGroups = ['AI'];
-    groupCounts['Human'] = data.filter(d => {
-      return Object.keys(d).some(k => k.startsWith('Acceptability_Human_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
-    }).length;
-    groupCounts['AI'] = data.filter(d => {
-      return Object.keys(d).some(k => k.startsWith('Acceptability_AI_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
-    }).length;
   } else {
-    // All other comparison types
-    let groupCol = null;
-    if (comparisonType === 'role') {
-      groupCol = 'Vis_Role';
-    } else if (comparisonType === 'experience') {
-      groupCol = 'Vis_Length';
-    } else if (comparisonType === 'frequency_vis') {
-      groupCol = 'Vis_Frequency';
-    } else if (comparisonType === 'frequency_public') {
-      groupCol = 'Public_Frequency';
-    } else if (comparisonType === 'domain') {
-      groupCol = 'Domains';
-    } else if (comparisonType === 'age') {
-      groupCol = 'Age';
-    } else if (comparisonType === 'tool_use') {
-      groupCol = 'Tool_use';
-    }
-    if (groupCol === 'Domains') {
-      groups = Array.from(new Set([].concat(...data.map(d => d['Domains'] || []))));
-      groups.forEach(g => {
-        groupCounts[g] = data.filter(d => (d['Domains'] || []).includes(g)).length;
-      });
-    } else {
-      groups = Array.from(new Set(data.map(d => d[groupCol])));
-      groups.forEach(g => {
-        groupCounts[g] = data.filter(d => d[groupCol] === g).length;
-      });
-    }
     output.humanGroups = groups.slice();
     output.aiGroups = groups.slice();
   }
-  output.groups = groups;
-  output.groupCounts = groupCounts;
 
   // No feature sorting here; handled on frontend
 
   // For each group and feature, collect all scores
   groups.forEach(group => {
     output.data[group] = {};
-    features.forEach(feat => {
+    FEATURES.forEach(feat => {
       let scoresHuman = [];
       let scoresAI = [];
       if (comparisonType === 'human_ai') {
         // Human
         if (group === 'Human') {
-          scoresHuman = data.map(d => likertMap[d['Acceptability_Human_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
+          scoresHuman = data.map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
           output.data[group][feat] = scoresHuman;
         } else {
-          scoresAI = data.map(d => likertMap[d['Acceptability_AI_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
+          scoresAI = data.map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
           output.data[group][feat] = scoresAI;
         }
       } else if (comparisonType === 'domain') {
         scoresHuman = data.filter(d => (d['Domains'] || []).includes(group))
-          .map(d => likertMap[d['Acceptability_Human_' + feat]])
+          .map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         scoresAI = data.filter(d => (d['Domains'] || []).includes(group))
-          .map(d => likertMap[d['Acceptability_AI_' + feat]])
+          .map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         output.data[group][feat] = scoresHuman;
         output.data[group + '__AI'] = output.data[group + '__AI'] || {};
         output.data[group + '__AI'][feat] = scoresAI;
       } else {
-        scoresHuman = data.filter(d => d[getComparisonCol(comparisonType)] === group)
-          .map(d => likertMap[d['Acceptability_Human_' + feat]])
+        scoresHuman = data.filter(d => d[getComparisonColumn(comparisonType)] === group)
+          .map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
-        scoresAI = data.filter(d => d[getComparisonCol(comparisonType)] === group)
-          .map(d => likertMap[d['Acceptability_AI_' + feat]])
+        scoresAI = data.filter(d => d[getComparisonColumn(comparisonType)] === group)
+          .map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         output.data[group][feat] = scoresHuman;
         output.data[group + '__AI'] = output.data[group + '__AI'] || {};
@@ -362,21 +349,9 @@ function aggregateBoxPlot(data, comparisonType, sortBy) {
 // --- Aggregation for Line Chart (Means and Standard Deviations) ---
 // Returns only aggregated means and standard deviations for line charts (never raw data)
 function aggregateLineChart(data, comparisonType, sortBy) {
-  // Acceptability columns and mapping
-  const features = [
-    'Smoothing', 'Textures', 'CamPos', 'Blur', 'Details', 'Errors',
-    'FeatureAddition', 'FeatureOmission', 'Gaps', 'Shape', 'Lighting',
-    'BgItems', 'BgImage', 'Position', 'Color'
-  ];
-  const likertMap = {
-    "Never acceptable": 0, "Rarely acceptable": 1, "Sometimes acceptable": 2,
-    "Often acceptable": 3, "Usually acceptable": 4, "Always acceptable": 5,
-    0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 // In case already mapped
-  };
-
   // Prepare output structure
   const output = {
-    features: features,
+    features: FEATURES,
     groups: [],
     means: {},
     meansHuman: {},
@@ -387,52 +362,9 @@ function aggregateLineChart(data, comparisonType, sortBy) {
   };
 
   // Determine groups and group counts
-  let groups = [];
-  let groupCounts = {};
-  if (comparisonType === 'human_ai') {
-    groups = ['Human', 'AI'];
-    groupCounts['Human'] = data.filter(d => {
-      return Object.keys(d).some(k => k.startsWith('Acceptability_Human_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
-    }).length;
-    groupCounts['AI'] = data.filter(d => {
-      return Object.keys(d).some(k => k.startsWith('Acceptability_AI_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
-    }).length;
-  } else if (comparisonType === 'role') {
-    groups = Array.from(new Set(data.map(d => d['Vis_Role'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Vis_Role'] === g).length;
-    });
-  } else if (comparisonType === 'experience') {
-    groups = Array.from(new Set(data.map(d => d['Vis_Length'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Vis_Length'] === g).length;
-    });
-  } else if (comparisonType === 'frequency_vis') {
-    groups = Array.from(new Set(data.map(d => d['Vis_Frequency'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Vis_Frequency'] === g).length;
-    });
-  } else if (comparisonType === 'frequency_public') {
-    groups = Array.from(new Set(data.map(d => d['Public_Frequency'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Public_Frequency'] === g).length;
-    });
-  } else if (comparisonType === 'domain') {
-    groups = Array.from(new Set([].concat(...data.map(d => d['Domains'] || []))));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => (d['Domains'] || []).includes(g)).length;
-    });
-  } else if (comparisonType === 'age') {
-    groups = Array.from(new Set(data.map(d => d['Age'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Age'] === g).length;
-    });
-  } else if (comparisonType === 'tool_use') {
-    groups = Array.from(new Set(data.map(d => d['Tool_use'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Tool_use'] === g).length;
-    });
-  }
+  const groupsAndCounts = getGroupsAndCounts(data, comparisonType);
+  const groups = groupsAndCounts.groups;
+  const groupCounts = groupsAndCounts.groupCounts;
   output.groups = groups;
   output.groupCounts = groupCounts;
 
@@ -445,38 +377,38 @@ function aggregateLineChart(data, comparisonType, sortBy) {
     output.meansAI[group] = {};
     output.stdsHuman[group] = {};
     output.stdsAI[group] = {};
-    features.forEach(feat => {
+    FEATURES.forEach(feat => {
       let scoresHuman = [];
       let scoresAI = [];
       if (comparisonType === 'human_ai') {
         if (group === 'Human') {
-          scoresHuman = data.map(d => likertMap[d['Acceptability_Human_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
+          scoresHuman = data.map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
           output.means[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
           output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
           output.stdsHuman[group][feat] = scoresHuman.length ? calculateStdDev(scoresHuman) : null;
         } else {
-          scoresAI = data.map(d => likertMap[d['Acceptability_AI_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
+          scoresAI = data.map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
           output.means[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
           output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
           output.stdsAI[group][feat] = scoresAI.length ? calculateStdDev(scoresAI) : null;
         }
       } else if (comparisonType === 'domain') {
         scoresHuman = data.filter(d => (d['Domains'] || []).includes(group))
-          .map(d => likertMap[d['Acceptability_Human_' + feat]])
+          .map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         scoresAI = data.filter(d => (d['Domains'] || []).includes(group))
-          .map(d => likertMap[d['Acceptability_AI_' + feat]])
+          .map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
         output.stdsHuman[group][feat] = scoresHuman.length ? calculateStdDev(scoresHuman) : null;
         output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
         output.stdsAI[group][feat] = scoresAI.length ? calculateStdDev(scoresAI) : null;
       } else {
-        scoresHuman = data.filter(d => d[getComparisonCol(comparisonType)] === group)
-          .map(d => likertMap[d['Acceptability_Human_' + feat]])
+        scoresHuman = data.filter(d => d[getComparisonColumn(comparisonType)] === group)
+          .map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
-        scoresAI = data.filter(d => d[getComparisonCol(comparisonType)] === group)
-          .map(d => likertMap[d['Acceptability_AI_' + feat]])
+        scoresAI = data.filter(d => d[getComparisonColumn(comparisonType)] === group)
+          .map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
         output.stdsHuman[group][feat] = scoresHuman.length ? calculateStdDev(scoresHuman) : null;
@@ -493,21 +425,9 @@ function aggregateLineChart(data, comparisonType, sortBy) {
 // Returns only aggregated means for slope charts (never raw data)
 // Same structure as line chart but can be used to show Human vs AI on same chart
 function aggregateSlopeChart(data, comparisonType, sortBy) {
-  // Acceptability columns and mapping
-  const features = [
-    'Smoothing', 'Textures', 'CamPos', 'Blur', 'Details', 'Errors',
-    'FeatureAddition', 'FeatureOmission', 'Gaps', 'Shape', 'Lighting',
-    'BgItems', 'BgImage', 'Position', 'Color'
-  ];
-  const likertMap = {
-    "Never acceptable": 0, "Rarely acceptable": 1, "Sometimes acceptable": 2,
-    "Often acceptable": 3, "Usually acceptable": 4, "Always acceptable": 5,
-    0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 // In case already mapped
-  };
-
   // Prepare output structure (same as line chart)
   const output = {
-    features: features,
+    features: FEATURES,
     groups: [],
     meansHuman: {},
     meansAI: {},
@@ -516,25 +436,30 @@ function aggregateSlopeChart(data, comparisonType, sortBy) {
   };
 
   // Determine groups and group counts
-  let groups = [];
-  let groupCounts = {};
+  const groupsAndCounts = getGroupsAndCounts(data, comparisonType);
+  const groups = groupsAndCounts.groups;
+  const groupCounts = groupsAndCounts.groupCounts;
+  output.groups = groups;
+  output.groupCounts = groupCounts;
+
   if (comparisonType === 'human_ai') {
-    groups = ['Human', 'AI'];
-    groupCounts['Human'] = data.filter(d => {
-      return Object.keys(d).some(k => k.startsWith('Acceptability_Human_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
-    }).length;
-    groupCounts['AI'] = data.filter(d => {
-      return Object.keys(d).some(k => k.startsWith('Acceptability_AI_') && d[k] !== undefined && d[k] !== null && d[k] !== '');
-    }).length;
+    output.pairedData = [];
+    groups.forEach(group => {
+      if (group === 'Human') {
+        output.groupCounts['Human'] = getResponseGroupCount(data, 'Acceptability_Human_');
+      } else if (group === 'AI') {
+        output.groupCounts['AI'] = getResponseGroupCount(data, 'Acceptability_AI_');
+      }
+    });
 
     // Collect paired individual responses for Human vs AI
     data.forEach(d => {
       const pair = { human: {}, ai: {} };
       let hasHuman = false;
       let hasAI = false;
-      features.forEach(feat => {
-        const hVal = likertMap[d['Acceptability_Human_' + feat]];
-        const aVal = likertMap[d['Acceptability_AI_' + feat]];
+      FEATURES.forEach(feat => {
+        const hVal = LIKERT_MAP[d['Acceptability_Human_' + feat]];
+        const aVal = LIKERT_MAP[d['Acceptability_AI_' + feat]];
         if (hVal !== undefined && hVal !== null && hVal !== '') {
           pair.human[feat] = hVal;
           hasHuman = true;
@@ -548,44 +473,10 @@ function aggregateSlopeChart(data, comparisonType, sortBy) {
         output.pairedData.push(pair);
       }
     });
-  } else if (comparisonType === 'role') {
-    groups = Array.from(new Set(data.map(d => d['Vis_Role'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Vis_Role'] === g).length;
-    });
-  } else if (comparisonType === 'experience') {
-    groups = Array.from(new Set(data.map(d => d['Vis_Length'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Vis_Length'] === g).length;
-    });
-  } else if (comparisonType === 'frequency_vis') {
-    groups = Array.from(new Set(data.map(d => d['Vis_Frequency'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Vis_Frequency'] === g).length;
-    });
-  } else if (comparisonType === 'frequency_public') {
-    groups = Array.from(new Set(data.map(d => d['Public_Frequency'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Public_Frequency'] === g).length;
-    });
-  } else if (comparisonType === 'domain') {
-    groups = Array.from(new Set([].concat(...data.map(d => d['Domains'] || []))));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => (d['Domains'] || []).includes(g)).length;
-    });
-  } else if (comparisonType === 'age') {
-    groups = Array.from(new Set(data.map(d => d['Age'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Age'] === g).length;
-    });
-  } else if (comparisonType === 'tool_use') {
-    groups = Array.from(new Set(data.map(d => d['Tool_use'])));
-    groups.forEach(g => {
-      groupCounts[g] = data.filter(d => d['Tool_use'] === g).length;
-    });
+  } else {
+    output.groups = groups;
+    output.groupCounts = groupCounts;
   }
-  output.groups = groups;
-  output.groupCounts = groupCounts;
 
   // No feature sorting here; handled on frontend
 
@@ -593,32 +484,32 @@ function aggregateSlopeChart(data, comparisonType, sortBy) {
   groups.forEach(group => {
     output.meansHuman[group] = {};
     output.meansAI[group] = {};
-    features.forEach(feat => {
+    FEATURES.forEach(feat => {
       let scoresHuman = [];
       let scoresAI = [];
       if (comparisonType === 'human_ai') {
         if (group === 'Human') {
-          scoresHuman = data.map(d => likertMap[d['Acceptability_Human_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
+          scoresHuman = data.map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
           output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
         } else {
-          scoresAI = data.map(d => likertMap[d['Acceptability_AI_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
+          scoresAI = data.map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]]).filter(v => v !== undefined && v !== null && v !== '');
           output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
         }
       } else if (comparisonType === 'domain') {
         scoresHuman = data.filter(d => (d['Domains'] || []).includes(group))
-          .map(d => likertMap[d['Acceptability_Human_' + feat]])
+          .map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         scoresAI = data.filter(d => (d['Domains'] || []).includes(group))
-          .map(d => likertMap[d['Acceptability_AI_' + feat]])
+          .map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
         output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
       } else {
-        scoresHuman = data.filter(d => d[getComparisonCol(comparisonType)] === group)
-          .map(d => likertMap[d['Acceptability_Human_' + feat]])
+        scoresHuman = data.filter(d => d[getComparisonColumn(comparisonType)] === group)
+          .map(d => LIKERT_MAP[d['Acceptability_Human_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
-        scoresAI = data.filter(d => d[getComparisonCol(comparisonType)] === group)
-          .map(d => likertMap[d['Acceptability_AI_' + feat]])
+        scoresAI = data.filter(d => d[getComparisonColumn(comparisonType)] === group)
+          .map(d => LIKERT_MAP[d['Acceptability_AI_' + feat]])
           .filter(v => v !== undefined && v !== null && v !== '');
         output.meansHuman[group][feat] = scoresHuman.length ? (scoresHuman.reduce((a, b) => a + b, 0) / scoresHuman.length) : null;
         output.meansAI[group][feat] = scoresAI.length ? (scoresAI.reduce((a, b) => a + b, 0) / scoresAI.length) : null;
@@ -637,30 +528,35 @@ function calculateStdDev(values) {
   return Math.sqrt(variance);
 }
 
-// --- Helper to map comparison type to column name ---
+function getResponseGroupCount(data, prefix) {
+  return data.filter(d => Object.keys(d).some(k => k.startsWith(prefix) && d[k] !== undefined && d[k] !== null && d[k] !== '')).length;
+}
 
-/**
- * API Documentation:
- *
- * GET endpoint (doGet):
- *   - chartType: 'box', 'line', or 'slope'
- *   - comparisonType: 'human_ai', 'role', 'experience', 'frequency_vis', 'frequency_public', 'domain', 'age', 'tool_use'
- *   - sortBy: (optional, for future use)
- *
- * Returns:
- *   For 'box': { features, groups, data } (aggregated scores per group/feature)
- *   For 'line': { features, groups, means } (mean scores per group/feature)
- *   For 'slope': { features, groups, meansHuman, meansAI } (mean scores for both human and AI)
- *
- * This API will NEVER return raw or row-level data, in compliance with IRB requirements.
- */
-function getComparisonCol(comparisonType) {
-  if (comparisonType === 'role') return 'Vis_Role';
-  if (comparisonType === 'experience') return 'Vis_Length';
-  if (comparisonType === 'frequency_vis') return 'Vis_Frequency';
-  if (comparisonType === 'frequency_public') return 'Public_Frequency';
-  if (comparisonType === 'domain') return 'Domains';
-  if (comparisonType === 'age') return 'Age';
-  if (comparisonType === 'tool_use') return 'Tool_use';
-  return comparisonType;
+function getGroupsAndCounts(data, comparisonType) {
+  if (comparisonType === 'human_ai') {
+    return {
+      groups: ['Human', 'AI'],
+      groupCounts: {
+        Human: getResponseGroupCount(data, 'Acceptability_Human_'),
+        AI: getResponseGroupCount(data, 'Acceptability_AI_')
+      }
+    };
+  }
+
+  const comparisonColumn = getComparisonColumn(comparisonType);
+  let groups = [];
+  if (comparisonColumn === 'Domains') {
+    groups = Array.from(new Set([].concat(...data.map(d => d['Domains'] || []))));
+  } else {
+    groups = Array.from(new Set(data.map(d => d[comparisonColumn])));
+  }
+  const groupCounts = {};
+  groups.forEach(group => {
+    if (comparisonColumn === 'Domains') {
+      groupCounts[group] = data.filter(d => (d['Domains'] || []).includes(group)).length;
+    } else {
+      groupCounts[group] = data.filter(d => d[comparisonColumn] === group).length;
+    }
+  });
+  return { groups, groupCounts };
 }

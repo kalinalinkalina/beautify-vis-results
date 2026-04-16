@@ -3,7 +3,7 @@ window.generateColorScale = generateColorScale;
 
 // Utility function to generate a color scale dynamically
 function generateColorScale(legend) {
-    const colors = [
+    const colors = window.DEFAULT_COLOR_PALETTE || [
         '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
         '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
     ];
@@ -28,93 +28,25 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     // Usage: Call showSpinner() before a server request and hideSpinner() in .finally() or after response.
     // --- Constants ---
-    const csvPath = 'data/data-4-13-26.csv';
-    const humanAcceptabilityCols = [
-            // Custom legend removed per user request
-        'Acceptability_Human_BgImage', 'Acceptability_Human_Position', 'Acceptability_Human_Color'
-    ];
-    const aiAcceptabilityCols = [
-        'Acceptability_AI_Smoothing', 'Acceptability_AI_Textures', 'Acceptability_AI_CamPos',
-        'Acceptability_AI_Blur', 'Acceptability_AI_Details', 'Acceptability_AI_Errors',
-        'Acceptability_AI_FeatureAddition', 'Acceptability_AI_FeatureOmission', 'Acceptability_AI_Gaps',
-        'Acceptability_AI_Shape', 'Acceptability_AI_Lighting', 'Acceptability_AI_BgItems',
-        'Acceptability_AI_BgImage', 'Acceptability_AI_Position', 'Acceptability_AI_Color'
-    ];
-    const likertMapping = {
-        "Never acceptable": 0, "Rarely acceptable": 1, "Sometimes acceptable": 2,
-        "Often acceptable": 3, "Usually acceptable": 4, "Always acceptable": 5
-    };
+    // The app now uses shared comparison and palette metadata from js/metadata.js.
 
     // --- State ---
     let backendData = null;
 
-    // --- Group label, color, and order mappings ---
-    const GROUP_METADATA = {
-        role: {
-            labelMap: {
-                "Creating visualizations is the primary role I perform in my work": "Viz Practitioner",
-                "I work with visualizations created by others, but I do not create or research visualization myself": "Scientist who uses vis",
-                "Researching visualization methods/techniques is my primary role": "Vis Researcher",
-                "I create visualizations to help me in my primary role, which is not visualization-related": "Scientist who creates vis"
-            },
-            colorMap: {
-                "Vis Researcher": 'red',
-                "Viz Practitioner": 'orange',
-                "Scientist who creates vis": 'blue',
-                "Scientist who uses vis": 'green'
-            },
-            order: ["Vis Researcher", "Viz Practitioner", "Scientist who creates vis", "Scientist who uses vis"]
-        },
-        experience: {
+    // --- Utility: shared comparison metadata ---
+    function getComparisonConfig(comparisonType) {
+        return (window.COMPARISON_CONFIG && window.COMPARISON_CONFIG[comparisonType]) || {
+            column: null,
+            label: comparisonType,
             labelMap: null,
-            colorMap: {
-                "Less than 1 year": "#5ec962", "1-3 years": "#3fbc73", "3-5 years": "#21918c", "5-10 years": "#31688e", "10-20 years": "#443983", "More than 20 years": "#440154"
-            },
-            order: ["Less than 1 year", "1-3 years", "3-5 years", "5-10 years", "10-20 years", "More than 20 years"]
-        },
-        frequency_vis: {
-            labelMap: null,
-            colorMap: {
-                "Less than once a year": "#5ec962", "Annually": "#27ad81", "Monthly": "#21918c", "Weekly": "#3b528b", "Daily": "#440154"
-            },
-            order: ["Less than once a year", "Annually", "Monthly", "Weekly", "Daily"]
-        },
-        frequency_public: {
-            labelMap: null,
-            colorMap: {
-                "Never": "#e07b7b", "Rarely": "#27ad81", "Occasionally": "#21918c", "Frequently": "#3b528b", "This is a primary part of my work": "#440154"
-            },
-            order: ["Never", "Rarely", "Occasionally", "Frequently", "This is a primary part of my work"]
-        },
-        age: {
-            labelMap: null,
-            colorMap: {
-                "18-24": "#5ec962", "25-34": "#3fbc73", "35-44": "#21918c", "45-54": "#31688e", "55-64": "#443983", "65+": "#440154"
-            },
-            order: ["18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
-        },
-        tool_use: {
-            labelMap: null,
-            colorMap: { "Yes": "#1976d2", "Maybe": "#8e24aa", "No": "#d32f2f" },
-            order: ["Yes", "Maybe", "No"]
-        },
-        domain: {
-            labelMap: null, // handled dynamically
-            colorMap: null, // handled dynamically
-            order: null
-        }
-    };
+            order: null,
+            colorMap: null
+        };
+    }
 
-    const COMPARISON_LABELS = {
-        human_ai: 'Human vs AI',
-        role: 'Role',
-        experience: 'Years of vis experience',
-        frequency_vis: 'Frequency of visualization',
-        frequency_public: 'Frequency of vis for public communication',
-        domain: 'Domain',
-        age: 'Age',
-        tool_use: 'Willingness to use AI tools'
-    };
+    function getComparisonLabel(comparisonType) {
+        return getComparisonConfig(comparisonType).label || comparisonType;
+    }
 
     // --- Utility: get current dropdown values ---
     function getSelections() {
@@ -199,21 +131,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Utility: get group display labels, colors, and order ---
     function getGroupMeta(comparisonType, groupValues) {
-        const meta = GROUP_METADATA[comparisonType] || {};
-        let labelMap = meta.labelMap || null;
-        let colorMap = meta.colorMap || null;
-        let order = meta.order || null;
-        // For domain, generate color map and order dynamically
+        const config = getComparisonConfig(comparisonType);
+        let labelMap = config.labelMap || null;
+        let colorMap = config.colorMap || null;
+        let order = config.order || null;
+
         if (comparisonType === 'domain' && groupValues) {
-            // Use Plotly qualitative colors
-            const pxColors = [
-                '#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52',
-                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-            ];
             order = groupValues.slice();
             colorMap = {};
-            order.forEach((g, i) => { colorMap[g] = pxColors[i % pxColors.length]; });
+            const pxColors = window.PLOTLY_QUALITATIVE_COLORS || [];
+            order.forEach((g, i) => {
+                colorMap[g] = pxColors[i % pxColors.length] || window.DEFAULT_COLOR_PALETTE[i % window.DEFAULT_COLOR_PALETTE.length];
+            });
         }
+
         return { labelMap, colorMap, order };
     }
 
@@ -310,6 +241,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Main plot update logic ---
     function updatePlots() {
         const { chartType, comparisonType, sortBy } = getSelections();
+        const comparisonConfig = getComparisonConfig(comparisonType);
         // Determine which containers should be visible for the selected chart type
         let showHumanPlot = true;
         let showAIPlot = false;
@@ -350,7 +282,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         'Type',
                         {
                             title: 'Acceptability of Human vs AI Alterations',
-                            colorMap: { 'Human': 'peru', 'AI': 'gray' },
+                            colorMap: comparisonConfig.colorMap,
                             categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
                             xaxisTitle: 'Type of Alteration',
                             yaxisTitle: 'Acceptability'
@@ -447,7 +379,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         { 'Human': humanMeans },
                         { 'AI': aiMeans },
                         featureOrder,
-                        { 'Human': 'peru', 'AI': 'gray' },
+                        comparisonConfig.colorMap,
                         ['Human', 'AI'],
                         {
                             title: 'Mean Acceptability (Human ● vs AI ○, individual responses shown as gray lines)',
@@ -525,7 +457,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     window.makeLineChart(
                         { 'Human': humanMeans, 'AI': aiMeans },
                         featureOrder,
-                        { 'Human': 'peru', 'AI': 'gray' },
+                        comparisonConfig.colorMap,
                         legendOrderWithCounts,
                         {
                             title: 'Mean Acceptability with ±1 Stdev Bands (Human ● vs AI ○)',
@@ -597,7 +529,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('ai-plot').style.display = 'block';
                 }
             } else if (chartType === 'swarm') {
-                const comparisonLabel = COMPARISON_LABELS[comparisonType] || comparisonType;
+                const comparisonLabel = getComparisonLabel(comparisonType);
                 if (comparisonType === 'human_ai') {
                     const combined = [];
                     backendData.groups.forEach(group => {
@@ -619,7 +551,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         'Type',
                         {
                             title: `Swarm Plot: Acceptability of Human vs AI Alterations`,
-                            colorMap: { 'Human': 'peru', 'AI': 'gray' },
+                            colorMap: comparisonConfig.colorMap,
                             categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
                             xaxisTitle: 'Type of Alteration',
                             yaxisTitle: 'Acceptability',
