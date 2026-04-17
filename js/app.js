@@ -166,66 +166,62 @@ document.addEventListener('DOMContentLoaded', function() {
                 return acc;
             }, {});
         }
-        if (sortBy === 'human_mean') {
+        function getMean(rows) {
+            return rows.reduce((sum, row) => sum + (row.Numerical_Score ?? 0), 0) / rows.length;
+        }
+        function getMedian(rows) {
+            const nums = rows.map(row => row.Numerical_Score).sort((a, b) => a - b);
+            const mid = Math.floor(nums.length / 2);
+            return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+        }
+
+        if (sortBy === 'mean') {
+            const grouped = groupBy([...(meltedHuman || []), ...(meltedAI || [])], 'Feature_Name');
+            return Object.keys(grouped).sort((a, b) => getMean(grouped[b]) - getMean(grouped[a]));
+        } else if (sortBy === 'human_mean') {
             const grouped = groupBy(meltedHuman, 'Feature_Name');
             return Object.keys(grouped).sort((a, b) => {
-                const meanA = grouped[a].reduce((s, r) => s + (r.Numerical_Score ?? 0), 0) / grouped[a].length;
-                const meanB = grouped[b].reduce((s, r) => s + (r.Numerical_Score ?? 0), 0) / grouped[b].length;
-                return meanB - meanA;
+                return getMean(grouped[b]) - getMean(grouped[a]);
             });
         } else if (sortBy === 'ai_mean') {
             const grouped = groupBy(meltedAI, 'Feature_Name');
             return Object.keys(grouped).sort((a, b) => {
-                const meanA = grouped[a].reduce((s, r) => s + (r.Numerical_Score ?? 0), 0) / grouped[a].length;
-                const meanB = grouped[b].reduce((s, r) => s + (r.Numerical_Score ?? 0), 0) / grouped[b].length;
-                return meanB - meanA;
+                return getMean(grouped[b]) - getMean(grouped[a]);
             });
         } else if (sortBy === 'difference') {
             const groupedH = groupBy(meltedHuman, 'Feature_Name');
             const groupedA = groupBy(meltedAI, 'Feature_Name');
             const allFeatures = Array.from(new Set([...Object.keys(groupedH), ...Object.keys(groupedA)]));
             return allFeatures.sort((a, b) => {
-                const meanH_A = groupedH[a] ? groupedH[a].reduce((s, r) => s + (r.Numerical_Score ?? 0), 0) / groupedH[a].length : 0;
-                const meanA_A = groupedA[a] ? groupedA[a].reduce((s, r) => s + (r.Numerical_Score ?? 0), 0) / groupedA[a].length : 0;
-                const meanH_B = groupedH[b] ? groupedH[b].reduce((s, r) => s + (r.Numerical_Score ?? 0), 0) / groupedH[b].length : 0;
-                const meanA_B = groupedA[b] ? groupedA[b].reduce((s, r) => s + (r.Numerical_Score ?? 0), 0) / groupedA[b].length : 0;
+                const meanH_A = groupedH[a] ? getMean(groupedH[a]) : 0;
+                const meanA_A = groupedA[a] ? getMean(groupedA[a]) : 0;
+                const meanH_B = groupedH[b] ? getMean(groupedH[b]) : 0;
+                const meanA_B = groupedA[b] ? getMean(groupedA[b]) : 0;
                 return (meanH_B - meanA_B) - (meanH_A - meanA_A);
             });
+        } else if (sortBy === 'median') {
+            const grouped = groupBy([...(meltedHuman || []), ...(meltedAI || [])], 'Feature_Name');
+            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
         } else if (sortBy === 'human_median') {
             const grouped = groupBy(meltedHuman, 'Feature_Name');
-            function median(arr) {
-                const nums = arr.map(r => r.Numerical_Score).sort((a, b) => a - b);
-                const mid = Math.floor(nums.length / 2);
-                return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
-            }
-            return Object.keys(grouped).sort((a, b) => median(grouped[b]) - median(grouped[a]));
+            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
         } else if (sortBy === 'ai_median') {
             const grouped = groupBy(meltedAI, 'Feature_Name');
-            function median(arr) {
-                const nums = arr.map(r => r.Numerical_Score).sort((a, b) => a - b);
-                const mid = Math.floor(nums.length / 2);
-                return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
-            }
-            return Object.keys(grouped).sort((a, b) => median(grouped[b]) - median(grouped[a]));
+            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
         } else if (sortBy === 'difference_median') {
             const groupedH = groupBy(meltedHuman, 'Feature_Name');
             const groupedA = groupBy(meltedAI, 'Feature_Name');
-            function median(arr) {
-                const nums = arr.map(r => r.Numerical_Score).sort((a, b) => a - b);
-                const mid = Math.floor(nums.length / 2);
-                return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
-            }
             const allFeatures = Array.from(new Set([...Object.keys(groupedH), ...Object.keys(groupedA)]));
             return allFeatures.sort((a, b) => {
-                const medH_A = groupedH[a] ? median(groupedH[a]) : 0;
-                const medA_A = groupedA[a] ? median(groupedA[a]) : 0;
-                const medH_B = groupedH[b] ? median(groupedH[b]) : 0;
-                const medA_B = groupedA[b] ? median(groupedA[b]) : 0;
+                const medH_A = groupedH[a] ? getMedian(groupedH[a]) : 0;
+                const medA_A = groupedA[a] ? getMedian(groupedA[a]) : 0;
+                const medH_B = groupedH[b] ? getMedian(groupedH[b]) : 0;
+                const medA_B = groupedA[b] ? getMedian(groupedA[b]) : 0;
                 return (medH_B - medA_B) - (medH_A - medA_A);
             });
         }
-        // Default: human_mean
-        return getFeatureSortOrder('human_mean', meltedHuman, meltedAI);
+        // Default: overall mean
+        return getFeatureSortOrder('mean', meltedHuman, meltedAI);
     }
 
     function getContextFeatureSortOrder(sortBy, rows, fallbackFeatures) {
@@ -247,7 +243,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
         }
 
-        const metric = sortBy === 'human_median' ? 'median' : 'mean';
+        const metric = (sortBy === 'median' || sortBy === 'human_median') ? 'median' : 'mean';
         const ordered = Object.keys(grouped).sort((a, b) => {
             const valuesA = grouped[a];
             const valuesB = grouped[b];
@@ -1237,6 +1233,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const summaryOption = comparisonSelect.querySelector('option[value="summary"]');
         const slopeOption = chartTypeSelect.querySelector('option[value="slope"]');
         const chartType = chartTypeSelect ? chartTypeSelect.value : null;
+        const comparisonType = comparisonSelect ? comparisonSelect.value : null;
+        const disableHumanAISorts = tabName === 'contexts' || comparisonType === 'summary';
 
         const disableHumanAI = tabName === 'contexts';
         if (humanAIOption) {
@@ -1269,12 +1267,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const sortOptionUpdates = [
-            { value: 'human_mean', disabled: false, label: tabName === 'contexts' ? 'Mean' : 'Human Mean' },
-            { value: 'ai_mean', disabled: tabName === 'contexts', label: 'AI Mean' },
-            { value: 'difference', disabled: tabName === 'contexts', label: 'Difference in Mean (Human - AI)' },
-            { value: 'human_median', disabled: false, label: tabName === 'contexts' ? 'Median' : 'Human Median' },
-            { value: 'ai_median', disabled: tabName === 'contexts', label: 'AI Median' },
-            { value: 'difference_median', disabled: tabName === 'contexts', label: 'Difference in Median (Human - AI)' }
+            { value: 'mean', disabled: false, label: 'Mean' },
+            { value: 'human_mean', disabled: disableHumanAISorts, label: '\u00a0\u00a0Human Mean' },
+            { value: 'ai_mean', disabled: disableHumanAISorts, label: '\u00a0\u00a0AI Mean' },
+            { value: 'difference', disabled: disableHumanAISorts, label: '\u00a0\u00a0Difference in Means (Human - AI)' },
+            { value: 'median', disabled: false, label: 'Median' },
+            { value: 'human_median', disabled: disableHumanAISorts, label: '\u00a0\u00a0Human Median' },
+            { value: 'ai_median', disabled: disableHumanAISorts, label: '\u00a0\u00a0AI Median' },
+            { value: 'difference_median', disabled: disableHumanAISorts, label: '\u00a0\u00a0Difference in Medians (Human - AI)' }
         ];
         sortOptionUpdates.forEach(update => {
             const option = sortBySelect.querySelector(`option[value="${update.value}"]`);
@@ -1306,7 +1306,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const selectedSortOption = sortBySelect.querySelector(`option[value="${sortBySelect.value}"]`);
         if (selectedSortOption && selectedSortOption.disabled) {
-            sortBySelect.value = 'human_mean';
+            sortBySelect.value = 'mean';
         }
     }
 
