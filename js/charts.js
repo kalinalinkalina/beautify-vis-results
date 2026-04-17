@@ -1,3 +1,5 @@
+// Chart builder functions for Plotly visualizations
+
 function isScientistGroup(group) {
     if (typeof group !== 'string') return false;
     const normalized = group.trim().toLowerCase();
@@ -12,7 +14,6 @@ function isScientistGroup(group) {
 function resolvePlotContainer(container) {
     const plotContainer = typeof container === 'string' ? document.getElementById(container) : container;
     if (!plotContainer || typeof plotContainer.getAttribute !== 'function') {
-        console.error('Invalid Plotly container:', container, plotContainer);
         return null;
     }
     return plotContainer;
@@ -43,6 +44,10 @@ function getPlotlyLegendConfig(legendOptions = {}) {
         y: 1,
         yanchor: 'top'
     }, legendOptions);
+}
+
+function getFeatureLabel(feature) {
+    return (window.FEATURE_LABELS && window.FEATURE_LABELS[feature]) || feature;
 }
 
 function getMarkerSymbol(group) {
@@ -81,19 +86,7 @@ function buildXAxisConfig(title, tickvals, ticktext, tickangle = 30, type = 'lin
     return config;
 }
 
-// Plotting utilities for dashboard (using Plotly.js)
-
-/**
- * Draws a box plot using Plotly.js
- * @param {Array<Object>} data - Melted data array
- * @param {string} x - X axis field (e.g., 'Feature_Name')
- * @param {string} y - Y axis field (e.g., 'Numerical_Score')
- * @param {string} color - Field for grouping (e.g., 'Type')
- * @param {Object} options - { title, colorMap, categoryOrders, xaxisTitle, yaxisTitle }
- * @param {string} containerId - DOM element id to render the plot
- */
 function makeBoxPlot(data, x, y, color, options, containerId) {
-    // All group/legend/label/color logic is handled in app.js/data cleaning
     const {
         title = '',
         colorMap = {},
@@ -110,10 +103,9 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         traceNameMap: traceNameMap || {}
     });
     const xVals = [...new Set(data.map(row => row[x]))];
-    const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(xVals, FEATURE_LABELS);
+    const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(xVals, window.FEATURE_LABELS || {});
     const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
-    
-    // Sort traces according to legendOrder if provided
+
     let sortedTraces = traces;
     if (legendOrder && legendOrder.length > 0) {
         sortedTraces = [];
@@ -123,17 +115,15 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
                 sortedTraces.push(traces[traceIndex]);
             }
         });
-        // Append any traces not in legendOrder (shouldn't happen but be safe)
         traces.forEach(trace => {
             if (!sortedTraces.includes(trace)) {
                 sortedTraces.push(trace);
             }
         });
     }
-    
-    const layout = {
+
+    const layout = buildDefaultPlotLayout({
         title,
-        boxmode: 'group',
         xaxis: {
             title: xaxisTitle,
             tickangle: 30,
@@ -148,57 +138,37 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
             tickvals: yTickVals,
             ticktext: yTickText
         },
-        margin: { r: 180 },
-        legend: legendOrder ? { 
-            traceorder: 'normal'
-        } : undefined
-    };
+        legendOptions: legendOrder ? { traceorder: 'normal' } : {},
+        margin: { r: 180 }
+    });
+    layout.boxmode = 'group';
+    layout.boxgap = 0.3;
+    layout.boxgroupgap = 0.2;
+
     const filteredTraces = window.filterValidTraces(sortedTraces);
     if (filteredTraces.length === 0) return;
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, filteredTraces, layout, {responsive: true});
+    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
 }
 
-/**
- * Draws a line chart using Plotly.js with optional confidence bands
- * @param {Object} meanScoresDict - { group: { feature: mean, ... }, ... }
- * @param {Array<string>} featureOrder - Order of features for x-axis
- * @param {Object} legendColors - { group: color, ... }
- * @param {Array<string>} legendOrder - Order of groups in legend
- * @param {Object} options - { title, legendTitle, markerSymbols, stdDevDict }
- * @param {string} containerId - DOM element id to render the plot
- */
 function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, options, containerId) {
-    // All group/legend/label/color logic is handled in app.js/data cleaning
     options = options || {};
     const title = options.title || '';
     const legendTitle = options.legendTitle || '';
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
-    const stdDevDict = options.stdDevDict || null; // { group: { feature: stdDev, ... }, ... }
-    // Force squares for scientist groups
-    const scientistGroups = [
-        'Scientist who creates vis',
-        'Scientist who uses vis'
-    ];
-    // Special group for X marker
-    const xMarkerGroups = [
-        'Never'
-    ];
+    const stdDevDict = options.stdDevDict || null;
     const forceAIStyle = options.forceAIStyle || false;
     const sharedLayout = options.sharedLayout || null;
-    // Accept traceNameMap for legend labels with counts
     const traceNameMap = options.traceNameMap || {};
-    // Accept groupOrder (short names for data lookup) separate from legendOrder (display names)
     const groupOrder = options.groupOrder || legendOrder;
     featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
-    const pairedData = options.pairedData || []; // Individual responses
-    
+    const pairedData = options.pairedData || [];
+
     function colorToRgba(color, alpha) {
         if (!color) {
             return `rgba(153, 153, 153, ${alpha})`;
         }
-        // If it's already an rgba from hexToRgba, return as is (already has alpha)
         if (color.startsWith('rgba')) {
             return color;
         }
@@ -214,17 +184,15 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 return rgba;
             }
         } catch (err) {
-            // Fallback to default gray if parsing fails
         }
         return `rgba(153, 153, 153, ${alpha})`;
     }
-    
-    // Filter out nan/null/empty group names from groupOrder
+
     const safeGroupOrder = Array.isArray(groupOrder) ? groupOrder : (groupOrder && typeof groupOrder === 'object' ? Object.values(groupOrder) : []);
     const validGroupOrder = safeGroupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
-     const lineTraces = [];
-     const bandTraces = [];
-    
+    const lineTraces = [];
+    const bandTraces = [];
+
     validGroupOrder.forEach(group => {
         const groupData = meanScoresDict.hasOwnProperty(group) ? meanScoresDict[group] : {};
         const xVals = featureOrder;
@@ -233,20 +201,14 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             return (v !== null && v !== undefined && !Number.isNaN(v)) ? v : null;
         });
         let markerSymbol = safeMarkerSymbols[group] || getMarkerSymbol(group);
-        // Force squares for scientist groups
         if (isScientistGroup(group)) {
             markerSymbol = 'square';
         }
-        // Force X for Never group
-        if (xMarkerGroups.includes(group)) {
+        if (['Never'].includes(group)) {
             markerSymbol = 'x';
         }
         let marker;
-        if (
-            forceAIStyle ||
-            (typeof group === 'string' && group.toLowerCase().includes('ai') && !group.toLowerCase().includes('daily'))
-        ) {
-            // AI: outlined marker with white fill
+        if (forceAIStyle || (typeof group === 'string' && group.toLowerCase().includes('ai') && !group.toLowerCase().includes('daily'))) {
             marker = {
                 size: 10,
                 symbol: markerSymbol,
@@ -254,7 +216,6 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 line: { color: legendColors[group] || '#222', width: 3 }
             };
         } else {
-            // Human: filled marker with group color
             marker = {
                 size: 10,
                 symbol: markerSymbol,
@@ -262,8 +223,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 opacity: 1
             };
         }
-        
-        // Add confidence band as a filled area
+
         if (stdDevDict && stdDevDict[group]) {
             const groupStdDev = stdDevDict[group];
             const upperVals = featureOrder.map((f, idx) => {
@@ -283,7 +243,6 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 return null;
             });
 
-            // Use the same X values as the line chart to ensure perfect alignment for the filled band
             const bandX = featureOrder;
             const bandUpper = featureOrder.map((_, idx) => upperVals[idx] !== null ? upperVals[idx] : null);
             const bandLower = featureOrder.map((_, idx) => lowerVals[idx] !== null ? lowerVals[idx] : null);
@@ -323,20 +282,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 bandTraces.push(bandTrace);
             });
         }
-        
-        const lineTrace = {
-            x: xVals,
-            y: yVals,
-            name: traceNameMap[group] || group,
-            mode: 'lines+markers',
-            line: { color: legendColors[group] || undefined, width: 2 },
-            marker: marker,
-            connectgaps: true,
-            legendgroup: group, // Link visibility to the group
-            layer: 'above',
-            isConfidenceBand: false
-        };
-        lineTraces.push(lineTrace);
+
         const lineOverlayTrace = {
             x: xVals,
             y: yVals,
@@ -351,6 +297,19 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             isConfidenceBand: false
         };
         lineTraces.push(lineOverlayTrace);
+        const lineTrace = {
+            x: xVals,
+            y: yVals,
+            name: traceNameMap[group] || group,
+            mode: 'lines+markers',
+            line: { color: legendColors[group] || undefined, width: 2 },
+            marker,
+            connectgaps: true,
+            legendgroup: group,
+            layer: 'above',
+            isConfidenceBand: false
+        };
+        lineTraces.push(lineTrace);
     });
 
     const traces = [...bandTraces, ...lineTraces];
@@ -360,72 +319,44 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const lineTracesOnly = filteredTraces.filter(t => !t.isConfidenceBand);
     const sortedLineTraces = orderTracesByLegend(lineTracesOnly, legendOrder);
     filteredTraces = [...bandTracesOnly, ...sortedLineTraces];
-    
+
     let layout;
     if (sharedLayout) {
-        layout = Object.assign({}, sharedLayout, { 
+        layout = Object.assign({}, sharedLayout, {
             title,
-            legend: Object.assign({}, sharedLayout.legend || {}, {
-                orientation: 'v',
-                x: 1,
-                xanchor: 'left',
-                y: 1,
-                yanchor: 'top'
-            })
+            legend: Object.assign({}, sharedLayout.legend || {}, getPlotlyLegendConfig({ title: { text: legendTitle } }))
         });
     } else {
         const xTickVals = featureOrder;
-        const xTickText = featureOrder.map(f => FEATURE_LABELS[f] || f);
+        const xTickText = featureOrder.map(f => getFeatureLabel(f));
         const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
-        layout = {
+        layout = buildDefaultPlotLayout({
             title,
             xaxis: buildXAxisConfig('Type of Alteration', xTickVals, xTickText, 30, 'category'),
             yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
-            legend: getPlotlyLegendConfig(),
+            legendOptions: { title: { text: legendTitle } },
             height: 500,
             margin: { r: 180 }
-        };
+        });
     }
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, filteredTraces, layout, {responsive: true});
+    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
 }
 
-/**
- * Draws a slope chart using Plotly.js
- * Shows Human vs AI comparisons with connecting lines and separate markers
- * For grouped comparisons (role, experience, etc.), shows separate slopes for each group
- * @param {Object} meanScoresDict - { group: { feature: mean, ... }, ... } for both human and AI
- * @param {Object} meanScoresDictAI - AI means (same structure)
- * @param {Array<string>} featureOrder - Order of features for x-axis
- * @param {Object} legendColors - { group: color, ... }
- * @param {Array<string>} legendOrder - Order of groups in legend
- * @param {Object} options - { title, legendTitle, markerSymbols, isGrouped, traceNameMap }
- * @param {string} containerId - DOM element id to render the plot
- */
 function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendColors, legendOrder, options, containerId) {
     options = options || {};
     const title = options.title || '';
+    const legendTitle = options.legendTitle || '';
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
     const isGrouped = options.isGrouped || false;
     const groupOrder = options.groupOrder || legendOrder;
     featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
     const traceNameMap = options.traceNameMap || {};
-    const pairedData = options.pairedData || []; // Individual responses
-    
-    // Force squares for scientist groups
-    const scientistGroups = [
-        'Scientist who creates vis',
-        'Scientist who uses vis'
-    ];
-    // Special group for X marker
-    const xMarkerGroups = [
-        'Never'
-    ];
-    
+    const pairedData = options.pairedData || [];
+
     const traces = [];
-    
-    // 1. Draw individual response lines (ONLY for non-grouped Human vs AI)
+
     if (!isGrouped && pairedData.length > 0) {
         pairedData.forEach(pair => {
             featureOrder.forEach((feature, featureIdx) => {
@@ -447,35 +378,31 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
         });
     }
 
-    // 2. Draw mean slopes (connected markers)
     featureOrder.forEach((feature, featureIdx) => {
         const featureX = featureIdx;
-        
+
         if (isGrouped) {
-            // For grouped comparisons: create separate slopes for each group
             const safeGroupOrder = Array.isArray(groupOrder) ? groupOrder : (groupOrder && typeof groupOrder === 'object' ? Object.values(groupOrder) : []);
             const validGroupOrder = safeGroupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
-            
+
             validGroupOrder.forEach((group, groupIdx) => {
                 const humanMean = meanScoresDict[group] && meanScoresDict[group][feature] != null ? meanScoresDict[group][feature] : null;
                 const aiMean = meanScoresDictAI[group] && meanScoresDictAI[group][feature] != null ? meanScoresDictAI[group][feature] : null;
-                
+
                 if (humanMean === null || aiMean === null) return;
-                
-                // Add connecting line
+
                 traces.push({
                     x: [featureX - 0.1, featureX + 0.1],
                     y: [humanMean, aiMean],
                     mode: 'lines',
-                    line: { color: legendColors[group] || 'peru', width: 2 }, // Use human color or default to 'peru'
+                    line: { color: legendColors[group] || 'peru', width: 2 },
                     showlegend: false,
                     hoverinfo: 'skip',
-                    legendgroup: group // Link visibility to the group
+                    legendgroup: group
                 });
 
-                // Add human marker (filled)
                 let markerSymbol = safeMarkerSymbols[group] || getMarkerSymbol(group);
-                if (xMarkerGroups.includes(group)) {
+                if (['Never'].includes(group)) {
                     markerSymbol = 'x';
                 }
 
@@ -489,13 +416,12 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                         color: legendColors[group] || '#222',
                         opacity: 1
                     },
-                    showlegend: featureIdx === 0, // Show legend only for the first feature
-                    legendgroup: group, // Group legend entries by group
+                    showlegend: featureIdx === 0,
+                    legendgroup: group,
                     hovertemplate: `<b>${group}</b><br>Human: ${humanMean.toFixed(2)}<extra></extra>`,
                     name: traceNameMap[group] || group
                 });
 
-                // Add AI marker (outlined)
                 traces.push({
                     x: [featureX + 0.1],
                     y: [aiMean],
@@ -506,35 +432,30 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                         color: '#fff',
                         line: { color: legendColors[group] || '#222', width: 3 }
                     },
-                    showlegend: false, // Do not show AI markers in the legend
-                    legendgroup: group, // Link visibility to the group
+                    showlegend: false,
+                    legendgroup: group,
                     hovertemplate: `<b>${group}</b><br>AI: ${aiMean.toFixed(2)}<extra></extra>`,
                     name: ''
                 });
             });
         } else {
-            // For human_ai comparison: single slope per feature
             const humanMean = meanScoresDict['Human'] && meanScoresDict['Human'][feature] != null ? meanScoresDict['Human'][feature] : null;
             const aiMean = meanScoresDictAI['AI'] && meanScoresDictAI['AI'][feature] != null ? meanScoresDictAI['AI'][feature] : null;
-            
+
             if (humanMean === null || aiMean === null) return;
-            
-            // Use fixed offsets so all groups for a given feature share the same start/end x positions
             const humanX = featureX - 0.15;
             const aiX = featureX + 0.15;
-            
-            // Add connecting line
+
             traces.push({
                 x: [humanX, aiX],
                 y: [humanMean, aiMean],
                 mode: 'lines',
-                line: { color: legendColors['Human'] || 'peru', width: 2 }, // Use human color or default to 'peru'
+                line: { color: legendColors['Human'] || 'peru', width: 2 },
                 showlegend: false,
                 hoverinfo: 'skip',
-                legendgroup: 'human' // Link visibility to the group
+                legendgroup: 'human'
             });
-            
-            // Add human marker (filled)
+
             traces.push({
                 x: [humanX],
                 y: [humanMean],
@@ -550,8 +471,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 hovertemplate: `Human: ${humanMean.toFixed(2)}<extra></extra>`,
                 name: 'Human'
             });
-            
-            // Add AI marker (outlined)
+
             traces.push({
                 x: [aiX],
                 y: [aiMean],
@@ -569,33 +489,23 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
             });
         }
     });
-    
-    const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(featureOrder, FEATURE_LABELS);
+
+    const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(featureOrder, window.FEATURE_LABELS || {});
     const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
-    
-    const layout = {
+
+    const layout = buildDefaultPlotLayout({
         title,
         xaxis: buildXAxisConfig('Type of Alteration', featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
         yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
-        legend: getPlotlyLegendConfig(),
-        margin: { r: 180 },
-        hovermode: 'closest'
-    };
+        legendOptions: { title: { text: legendTitle } },
+        margin: { r: 180 }
+    });
     const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
     Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
 }
 
-/**
- * Draws a scatter-based swarm plot using Plotly.js
- * @param {Array<Object>} data - Data array
- * @param {string} x - X axis field (e.g., 'Feature_Name')
- * @param {string} y - Y axis field (e.g., 'Numerical_Score')
- * @param {string} group - Field for grouping (e.g., 'Type')
- * @param {Object} options - { title, colorMap, categoryOrders, xaxisTitle, yaxisTitle }
- * @param {string} containerId - DOM element id to render the plot
- */
 function makeSwarmPlot(data, x, y, group, options, containerId) {
     options = options || {};
     const {
@@ -639,7 +549,7 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
             const jitterY = (Math.random() - 0.5) * jitterAmplitude;
             return row[y] + jitterY;
         });
-        const textLabels = groupData.map(row => FEATURE_LABELS[row[x]] || row[x]);
+        const textLabels = groupData.map(row => getFeatureLabel(row[x]));
         const traceName = traceNameMap[groupName] || groupName;
 
         traces.push({
@@ -666,57 +576,44 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         });
     });
 
-    const xTickText = featureOrder.map(f => FEATURE_LABELS[f] || f);
+    const xTickText = featureOrder.map(f => getFeatureLabel(f));
     const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
-    const layout = {
+    const layout = buildDefaultPlotLayout({
         title,
         xaxis: buildXAxisConfig(xaxisTitle, featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
         yaxis: buildYAxisConfig(yaxisTitle, yTickVals, yTickText, true),
-        legend: getPlotlyLegendConfig({ traceorder: legendTraceOrder }),
-        margin: { r: 180 },
-        hovermode: 'closest'
-    };
+        legendOptions: { traceorder: legendTraceOrder },
+        margin: { r: 180 }
+    });
     const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
     Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
 }
 
-// Human-readable feature name mapping (should match Python FEATURE_LABELS)
-// Helper function to convert hex color to rgba
 function hexToRgba(hex, alpha) {
-    // Remove '#' if present
     hex = hex.replace('#', '');
-    // Parse hex to RGB
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
     const b = parseInt(hex.substring(4, 6), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-const FEATURE_LABELS = {
-    "CamPos": "Camera Position",
-    "Smoothing": "Smoothing",
-    "Lighting": "Lighting",
-    "Color": "Color Remapping",
-    "Errors": "Removing Errors",
-    "Details": "Enhancing Details",
-    "Textures": "Adding Textures",
-    "BgImage": "Background Image",
-    "Blur": "Camera Focus/Blur",
-    "BgItems": "Background Items",
-    "Gaps": "Filling in Gaps",
-    "Position": "Changing Positions",
-    "FeatureOmission": "Feature Omission",
-    "FeatureAddition": "Feature Addition",
-    "Shape": "Changing Shape"
-};
+function buildDefaultPlotLayout({ title = '', xaxis = {}, yaxis = {}, legendOptions = {}, height = 500, margin = { r: 180 }, hovermode = 'closest' } = {}) {
+    return {
+        title,
+        xaxis,
+        yaxis,
+        legend: getPlotlyLegendConfig(legendOptions),
+        height,
+        margin,
+        hovermode
+    };
+}
 
-// Export for use in app.js
 if (typeof window !== 'undefined') {
     window.makeBoxPlot = makeBoxPlot;
     window.makeLineChart = makeLineChart;
     window.makeSlopeChart = makeSlopeChart;
     window.makeSwarmPlot = makeSwarmPlot;
-    window.FEATURE_LABELS = FEATURE_LABELS;
 }

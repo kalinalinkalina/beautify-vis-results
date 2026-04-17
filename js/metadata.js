@@ -1,4 +1,5 @@
-// Shared frontend metadata for comparison configuration and color palettes
+// Shared frontend metadata: comparison configuration, color palettes, and feature labels
+
 const DEFAULT_COLOR_PALETTE = [
     '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
     '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
@@ -101,8 +102,27 @@ const COMPARISON_CONFIG = {
     }
 };
 
+const FEATURE_LABELS = {
+    "CamPos": "Camera Position",
+    "Smoothing": "Smoothing",
+    "Lighting": "Lighting",
+    "Color": "Color Remapping",
+    "Errors": "Removing Errors",
+    "Details": "Enhancing Details",
+    "Textures": "Adding Textures",
+    "BgImage": "Background Image",
+    "Blur": "Camera Focus/Blur",
+    "BgItems": "Background Items",
+    "Gaps": "Filling in Gaps",
+    "Position": "Changing Positions",
+    "FeatureOmission": "Feature Omission",
+    "FeatureAddition": "Feature Addition",
+    "Shape": "Changing Shape"
+};
+
 if (typeof window !== 'undefined') {
     window.DEFAULT_COLOR_PALETTE = DEFAULT_COLOR_PALETTE;
     window.PLOTLY_QUALITATIVE_COLORS = PLOTLY_QUALITATIVE_COLORS;
     window.COMPARISON_CONFIG = COMPARISON_CONFIG;
+    window.FEATURE_LABELS = FEATURE_LABELS;
 }

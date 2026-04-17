@@ -1,4 +1,4 @@
-// Plotting utility functions for common operations shared by plotting.js
+// Shared frontend plotting utilities for use by chart builder modules
 
 /**
  * Filters out traces with falsy names or named 'trace'.
@@ -67,7 +67,9 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
                 boxpoints: 'outliers',
                 boxmean: false,
                 line: { width: 2 },
-                median: { line: { width: 6 } }
+                median: { line: { width: 6 } },
+                offsetgroup: traceName,
+                legendgroup: traceName
             };
         } else if (traceType === 'line') {
             return {
@@ -84,7 +86,7 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
     }).filter(Boolean);
 }
 
-// Export for use in plotting.js
+// Export for use by chart builder modules
 if (typeof window !== 'undefined') {
     window.filterValidTraces = filterValidTraces;
     window.getAxisTicks = getAxisTicks;

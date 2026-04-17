@@ -20,7 +20,6 @@ document.addEventListener('DOMContentLoaded', function() {
     function hideSpinner() {
         if (spinner) spinner.style.display = 'none';
     }
-    const API_URL = 'https://script.google.com/macros/s/AKfycbzed7aTbsJ6ZqibTeWoyRIv-Wp1mJllNMzPSFw64Ju0naXl7l6QW6KxAj98R_AdzaCs/exec';
     // --- Constants ---
     // The app now uses shared comparison and palette metadata from js/metadata.js.
 
@@ -49,6 +48,77 @@ document.addEventListener('DOMContentLoaded', function() {
             comparisonType: document.getElementById('comparison-type').value,
             sortBy: document.getElementById('sort-by').value
         };
+    }
+
+    function validateBackendDataShape(data, chartType) {
+        if (!data || typeof data !== 'object') {
+            throw new Error('Backend response is not a valid object.');
+        }
+        if (!Array.isArray(data.groups)) {
+            throw new Error('Backend response missing required array "groups".');
+        }
+        if (!Array.isArray(data.features)) {
+            throw new Error('Backend response missing required array "features".');
+        }
+        if (typeof data.groupCounts !== 'object' || data.groupCounts === null || Array.isArray(data.groupCounts)) {
+            throw new Error('Backend response missing required object "groupCounts".');
+        }
+        if (data.groups.length > 0 && Object.keys(data.groupCounts).length === 0) {
+            throw new Error('Backend response "groupCounts" must contain entries for the requested groups.');
+        }
+        data.groups.forEach(group => {
+            if (group !== undefined && group !== null && String(group).trim() !== '' && data.groupCounts[group] === undefined) {
+                throw new Error(`Backend response missing group count for "${group}".`);
+            }
+        });
+
+        const optionalObjects = ['data', 'dataHuman', 'dataAI', 'means', 'meansHuman', 'meansAI', 'stdsHuman', 'stdsAI', 'pairedData'];
+        optionalObjects.forEach(name => {
+            if (data[name] !== undefined && (typeof data[name] !== 'object' || data[name] === null)) {
+                throw new Error(`Backend response property "${name}" must be an object or array if present.`);
+            }
+        });
+
+        if (chartType === 'box') {
+            if (typeof data.data !== 'object' || data.data === null) {
+                throw new Error('Box plot response must include "data".');
+            }
+        }
+        if (chartType === 'line') {
+            if (typeof data.meansHuman !== 'object' || data.meansHuman === null) {
+                throw new Error('Line chart response must include "meansHuman".');
+            }
+            if (typeof data.meansAI !== 'object' || data.meansAI === null) {
+                throw new Error('Line chart response must include "meansAI".');
+            }
+            if (typeof data.stdsHuman !== 'object' || data.stdsHuman === null) {
+                throw new Error('Line chart response must include "stdsHuman".');
+            }
+            if (typeof data.stdsAI !== 'object' || data.stdsAI === null) {
+                throw new Error('Line chart response must include "stdsAI".');
+            }
+        }
+        if (chartType === 'slope') {
+            if (typeof data.meansHuman !== 'object' || data.meansHuman === null) {
+                throw new Error('Slope chart response must include "meansHuman".');
+            }
+            if (typeof data.meansAI !== 'object' || data.meansAI === null) {
+                throw new Error('Slope chart response must include "meansAI".');
+            }
+            if (data.pairedData !== undefined && !Array.isArray(data.pairedData)) {
+                throw new Error('Slope chart response "pairedData" must be an array if present.');
+            }
+        }
+        if (chartType === 'swarm') {
+            if (typeof data.dataHuman !== 'object' || data.dataHuman === null) {
+                throw new Error('Swarm plot response must include "dataHuman".');
+            }
+            if (typeof data.dataAI !== 'object' || data.dataAI === null) {
+                throw new Error('Swarm plot response must include "dataAI".');
+            }
+        }
+
+        return true;
     }
 
     // --- Utility: sort features by mean, median, or difference ---
@@ -232,11 +302,361 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- Refactored rendering functions ---
+    function buildLegendLabels(rawGroups, labelMap, groupCounts) {
+        return rawGroups.map(rawGroup => {
+            const displayName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
+            const count = groupCounts && groupCounts[rawGroup] !== undefined ? groupCounts[rawGroup] : 0;
+            return `${displayName} (${count})`;
+        });
+    }
+
+    function getFeatureOrderFromBackend(sortBy, meltedHuman, meltedAI) {
+        return getFeatureSortOrder(sortBy, meltedHuman, meltedAI);
+    }
+
+    function renderBoxPlot(backendData, comparisonType, sortBy) {
+        const comparisonConfig = getComparisonConfig(comparisonType);
+
+        if (comparisonType === 'human_ai') {
+            const combined = [];
+            backendData.groups.forEach(group => {
+                backendData.features.forEach(feat => {
+                    (backendData.data[group][feat] || []).forEach(score => {
+                        combined.push({ Feature_Name: feat, Numerical_Score: score, Type: group });
+                    });
+                });
+            });
+            const featureOrder = getFeatureOrderFromBackend(
+                sortBy,
+                combined.filter(r => r.Type === 'Human'),
+                combined.filter(r => r.Type === 'AI')
+            );
+            makeBoxPlot(
+                combined,
+                'Feature_Name',
+                'Numerical_Score',
+                'Type',
+                {
+                    title: 'Acceptability of Human vs AI Alterations',
+                    colorMap: comparisonConfig.colorMap,
+                    categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Acceptability'
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
+        }
+
+        const { groupOrder, groupKey, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
+        let meltedHuman = [];
+        let meltedAI = [];
+
+        backendData.groups.forEach(group => {
+            backendData.features.forEach(feat => {
+                const humanScores = (backendData.data[group] && backendData.data[group][feat]) ? backendData.data[group][feat] : [];
+                const aiScores = (backendData.data[`${group}__AI`] && backendData.data[`${group}__AI`][feat]) ? backendData.data[`${group}__AI`][feat] : [];
+
+                humanScores.forEach(score => meltedHuman.push({ Feature_Name: feat, Numerical_Score: score, Group: group }));
+                aiScores.forEach(score => meltedAI.push({ Feature_Name: feat, Numerical_Score: score, Group: group }));
+            });
+        });
+
+        if (!backendData.humanGroups) meltedHuman = meltedHuman.concat(meltedAI);
+        if (!backendData.aiGroups) meltedAI = meltedAI.concat(meltedHuman);
+
+        const featureOrder = getFeatureOrderFromBackend(sortBy, meltedHuman, meltedAI);
+        const boxPlotLegendOrder = groupOrder.map(g => traceNameMap[g]);
+
+        makeBoxPlot(
+            meltedHuman,
+            'Feature_Name',
+            'Numerical_Score',
+            groupKey,
+            {
+                title: 'Acceptability of Human Alterations',
+                colorMap: colorMap,
+                categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                xaxisTitle: 'Type of Alteration',
+                yaxisTitle: 'Acceptability',
+                legendOrder: boxPlotLegendOrder,
+                traceNameMap: traceNameMap
+            },
+            'human-plot'
+        );
+        makeBoxPlot(
+            meltedAI,
+            'Feature_Name',
+            'Numerical_Score',
+            groupKey,
+            {
+                title: 'Acceptability of AI Alterations',
+                colorMap: colorMap,
+                categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                xaxisTitle: 'Type of Alteration',
+                yaxisTitle: 'Acceptability',
+                legendOrder: boxPlotLegendOrder,
+                traceNameMap: traceNameMap
+            },
+            'ai-plot'
+        );
+        document.getElementById('human-plot').style.display = 'block';
+        document.getElementById('ai-plot').style.display = 'block';
+    }
+
+    function renderSlopeChart(backendData, comparisonType, sortBy) {
+        const comparisonConfig = getComparisonConfig(comparisonType);
+
+        if (comparisonType === 'human_ai') {
+            const humanMeans = backendData.meansHuman['Human'] || {};
+            const aiMeans = backendData.meansAI['AI'] || {};
+            const featureOrder = getFeatureOrderFromBackend(
+                sortBy,
+                Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
+                Object.entries(aiMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
+            );
+            makeSlopeChart(
+                { Human: humanMeans },
+                { AI: aiMeans },
+                featureOrder,
+                comparisonConfig.colorMap,
+                ['Human', 'AI'],
+                {
+                    title: 'Mean Acceptability (Human \u25cf vs AI \u25cb, individual responses shown as gray lines)',
+                    legendTitle: 'Type',
+                    groupOrder: ['Human', 'AI'],
+                    isGrouped: false,
+                    pairedData: backendData.pairedData || []
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
+        }
+
+        const { groupOrder, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
+        const legendWithCounts = buildLegendLabels(backendData.groups, labelMap, backendData.groupCounts);
+
+        const groupMeansHuman = {};
+        const groupMeansAI = {};
+        const groupStdsHuman = {};
+        const groupStdsAI = {};
+
+        backendData.groups.forEach(rawGroup => {
+            groupMeansHuman[rawGroup] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
+            groupMeansAI[rawGroup] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
+            groupStdsHuman[rawGroup] = backendData.stdsHuman ? (backendData.stdsHuman[rawGroup] || {}) : {};
+            groupStdsAI[rawGroup] = backendData.stdsAI ? (backendData.stdsAI[rawGroup] || {}) : {};
+        });
+
+        const featureOrder = getFeatureOrderFromBackend(
+            sortBy,
+            Object.entries(groupMeansHuman).flatMap(([feature, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v }))),
+            Object.entries(groupMeansAI).flatMap(([feature, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v })))
+        );
+
+        makeSlopeChart(
+            groupMeansHuman,
+            groupMeansAI,
+            featureOrder,
+            colorMap,
+            legendWithCounts,
+            {
+                title: 'Mean Acceptability (Human \u25cf vs AI \u25cb)',
+                legendTitle: 'Group',
+                traceNameMap: traceNameMap,
+                groupOrder: groupOrder,
+                isGrouped: true
+            },
+            'human-plot'
+        );
+        document.getElementById('human-plot').style.display = 'block';
+        document.getElementById('ai-plot').style.display = 'none';
+    }
+
+    function renderLineChart(backendData, comparisonType, sortBy) {
+        const comparisonConfig = getComparisonConfig(comparisonType);
+
+        if (comparisonType === 'human_ai') {
+            const humanMeans = backendData.means['Human'] || {};
+            const aiMeans = backendData.means['AI'] || {};
+            const humanStds = backendData.stdsHuman['Human'] || {};
+            const aiStds = backendData.stdsAI['AI'] || {};
+            const featureOrder = getFeatureOrderFromBackend(
+                sortBy,
+                Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
+                Object.entries(aiMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
+            );
+            const traceNameMap = { Human: `Human (${backendData.groupCounts?.Human || 0})`, AI: `AI (${backendData.groupCounts?.AI || 0})` };
+            makeLineChart(
+                { Human: humanMeans, AI: aiMeans },
+                featureOrder,
+                comparisonConfig.colorMap,
+                [traceNameMap.Human, traceNameMap.AI],
+                {
+                    title: 'Mean Acceptability with \u00b11 Stdev Bands (Human \u25cf vs AI \u25cb)',
+                    legendTitle: 'Type',
+                    traceNameMap: traceNameMap,
+                    groupOrder: ['Human', 'AI'],
+                    stdDevDict: { Human: humanStds, AI: aiStds }
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
+        }
+
+        const { groupOrder, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
+        const legendWithCounts = buildLegendLabels(backendData.groups, labelMap, backendData.groupCounts);
+
+        const groupMeansHuman = {};
+        const groupMeansAI = {};
+        const groupStdsHuman = {};
+        const groupStdsAI = {};
+
+        backendData.groups.forEach(rawGroup => {
+            groupMeansHuman[rawGroup] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
+            groupMeansAI[rawGroup] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
+            groupStdsHuman[rawGroup] = backendData.stdsHuman ? (backendData.stdsHuman[rawGroup] || {}) : {};
+            groupStdsAI[rawGroup] = backendData.stdsAI ? (backendData.stdsAI[rawGroup] || {}) : {};
+        });
+
+        const featureOrder = getFeatureOrderFromBackend(
+            sortBy,
+            Object.entries(groupMeansHuman).flatMap(([feature, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v }))),
+            Object.entries(groupMeansAI).flatMap(([feature, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v })))
+        );
+
+        makeLineChart(
+            groupMeansHuman,
+            featureOrder,
+            colorMap,
+            legendWithCounts,
+            {
+                title: 'Mean Acceptability for Human Alteration (\u00b11 Stdev Bands)',
+                legendTitle: 'Group',
+                traceNameMap: traceNameMap,
+                groupOrder: groupOrder,
+                isGrouped: true,
+                stdDevDict: groupStdsHuman
+            },
+            'human-plot'
+        );
+        makeLineChart(
+            groupMeansAI,
+            featureOrder,
+            colorMap,
+            legendWithCounts,
+            {
+                title: 'Mean Acceptability for AI Alteration (\u00b11 Stdev Bands)',
+                legendTitle: 'Group',
+                forceAIStyle: true,
+                traceNameMap: traceNameMap,
+                groupOrder: groupOrder,
+                stdDevDict: groupStdsAI
+            },
+            'ai-plot'
+        );
+        document.getElementById('human-plot').style.display = 'block';
+        document.getElementById('ai-plot').style.display = 'block';
+    }
+
+    function renderSwarmPlot(backendData, comparisonType, sortBy) {
+        const comparisonLabel = getComparisonLabel(comparisonType);
+        const comparisonConfig = getComparisonConfig(comparisonType);
+
+        if (comparisonType === 'human_ai') {
+            const combined = [];
+            backendData.groups.forEach(group => {
+                backendData.features.forEach(feat => {
+                    (backendData.data[feat][group] || []).forEach(score => {
+                        combined.push({ Feature_Name: feat, Numerical_Score: score, Type: group });
+                    });
+                });
+            });
+            const featureOrder = getFeatureOrderFromBackend(
+                sortBy,
+                combined.filter(r => r.Type === 'Human'),
+                combined.filter(r => r.Type === 'AI')
+            );
+            makeSwarmPlot(
+                combined,
+                'Feature_Name',
+                'Numerical_Score',
+                'Type',
+                {
+                    title: 'Swarm Plot: Acceptability of Human vs AI Alterations',
+                    colorMap: comparisonConfig.colorMap,
+                    categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Acceptability',
+                    traceNameMap: { Human: 'Human', AI: 'AI' }
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
+        }
+
+        const { groupOrder, groupKey, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
+        const combinedHuman = [];
+        const combinedAI = [];
+
+        backendData.groups.forEach(rawGroup => {
+            if (rawGroup === undefined || rawGroup === null || String(rawGroup).trim().toLowerCase() === 'nan' || String(rawGroup).trim() === '') return;
+            const shortName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
+            backendData.features.forEach(feat => {
+                const valuesH = (backendData.dataHuman[feat] && backendData.dataHuman[feat][rawGroup]) ? backendData.dataHuman[feat][rawGroup] : [];
+                valuesH.forEach(score => combinedHuman.push({ Feature_Name: feat, Numerical_Score: score, Group: rawGroup, ShortGroup: shortName }));
+                const valuesA = (backendData.dataAI[feat] && backendData.dataAI[feat][rawGroup]) ? backendData.dataAI[feat][rawGroup] : [];
+                valuesA.forEach(score => combinedAI.push({ Feature_Name: feat, Numerical_Score: score, Group: rawGroup, ShortGroup: shortName }));
+            });
+        });
+
+        const featureOrder = getFeatureOrderFromBackend(sortBy, combinedHuman, combinedAI);
+        makeSwarmPlot(
+            combinedHuman,
+            'Feature_Name',
+            'Numerical_Score',
+            groupKey,
+            {
+                title: `Swarm Plot: Acceptability of Human Alterations by ${comparisonLabel}`,
+                colorMap: colorMap || generateColorScale(groupOrder),
+                categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                xaxisTitle: 'Type of Alteration',
+                yaxisTitle: 'Acceptability',
+                traceNameMap: traceNameMap
+            },
+            'human-plot'
+        );
+        makeSwarmPlot(
+            combinedAI,
+            'Feature_Name',
+            'Numerical_Score',
+            groupKey,
+            {
+                title: `Swarm Plot: Acceptability of AI Alterations by ${comparisonLabel}`,
+                colorMap: colorMap || generateColorScale(groupOrder),
+                categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                xaxisTitle: 'Type of Alteration',
+                yaxisTitle: 'Acceptability',
+                traceNameMap: traceNameMap
+            },
+            'ai-plot'
+        );
+        document.getElementById('human-plot').style.display = 'block';
+        document.getElementById('ai-plot').style.display = 'block';
+    }
+
     // --- Main plot update logic ---
     function updatePlots() {
         const { chartType, comparisonType, sortBy } = getSelections();
-        const comparisonConfig = getComparisonConfig(comparisonType);
-        // Determine which containers should be visible for the selected chart type
         let showHumanPlot = true;
         let showAIPlot = false;
         if (chartType === 'box' || chartType === 'line' || chartType === 'swarm') {
@@ -244,381 +664,22 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         setPlotVisibility(showHumanPlot, showAIPlot);
 
-        // Defensive: try/catch for main logic
         try {
-            // --- Use backendData structure only ---
             if (!backendData) {
                 document.getElementById('human-plot').innerHTML = '<div style="color:red;text-align:center;padding:2em;">No data loaded from backend.</div>';
                 document.getElementById('human-plot').style.display = 'block';
                 document.getElementById('ai-plot').style.display = 'none';
                 return;
             }
+
             if (chartType === 'box') {
-                if (comparisonType === 'human_ai') {
-                    const combined = [];
-                    backendData.groups.forEach(group => {
-                        backendData.features.forEach(feat => {
-                            (backendData.data[group][feat] || []).forEach(score => {
-                                combined.push({
-                                    Feature_Name: feat,
-                                    Numerical_Score: score,
-                                    Type: group
-                                });
-                            });
-                        });
-                    });
-                    // Sort features for plotting
-                    const featureOrder = getFeatureSortOrder(sortBy, combined.filter(r => r.Type === 'Human'), combined.filter(r => r.Type === 'AI'));
-                    window.makeBoxPlot(
-                        combined,
-                        'Feature_Name',
-                        'Numerical_Score',
-                        'Type',
-                        {
-                            title: 'Acceptability of Human vs AI Alterations',
-                            colorMap: comparisonConfig.colorMap,
-                            categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
-                            xaxisTitle: 'Type of Alteration',
-                            yaxisTitle: 'Acceptability'
-                        },
-                        'human-plot'
-                    );
-                    document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'none';
-                } else {
-                    // --- Dual plot
-                    //  logic for all other comparison types ---
-                    const { groupOrder, groupKey, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
-                    let meltedHuman = [];
-                    let meltedAI = [];
-
-                    backendData.groups.forEach(group => {
-                        backendData.features.forEach(feat => {
-                            const humanScores = (backendData.data[group] && backendData.data[group][feat]) ? backendData.data[group][feat] : [];
-                            const aiScores = (backendData.data[`${group}__AI`] && backendData.data[`${group}__AI`][feat]) ? backendData.data[`${group}__AI`][feat] : [];
-                            const shortName = labelMap && labelMap[group] ? labelMap[group] : group;
-
-                            humanScores.forEach(score => {
-                                const entryH = {
-                                    Feature_Name: feat,
-                                    Numerical_Score: score,
-                                    Group: group
-                                };
-                                meltedHuman.push(entryH);
-                            });
-                            aiScores.forEach(score => {
-                                const entryA = {
-                                    Feature_Name: feat,
-                                    Numerical_Score: score,
-                                    Group: group
-                                };
-                                meltedAI.push(entryA);
-                            });
-                        });
-                    });
-                    // Legacy fallback for old responses that may not have separate human/AI group lists
-                    if (!backendData.humanGroups) meltedHuman = meltedHuman.concat(meltedAI);
-                    if (!backendData.aiGroups) meltedAI = meltedAI.concat(meltedHuman);
-                    // Sort features for plotting
-                    const featureOrder = getFeatureSortOrder(sortBy, meltedHuman, meltedAI);
-                    
-                    // Build legend order with counts for box plots
-                    const boxPlotLegendOrder = groupOrder.map(g => traceNameMap[g]);
-                    
-                    window.makeBoxPlot(
-                        meltedHuman,
-                        'Feature_Name',
-                        'Numerical_Score',
-                        groupKey,
-                        {
-                            title: `Acceptability of Human Alterations`,
-                            colorMap: colorMap,
-                            categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                            xaxisTitle: 'Type of Alteration',
-                            yaxisTitle: 'Acceptability',
-                            legendOrder: boxPlotLegendOrder,
-                            traceNameMap: traceNameMap
-                        },
-                        'human-plot'
-                    );
-                    window.makeBoxPlot(
-                        meltedAI,
-                        'Feature_Name',
-                        'Numerical_Score',
-                        groupKey,
-                        {
-                            title: `Acceptability of AI Alterations`,
-                            colorMap: colorMap,
-                            categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                            xaxisTitle: 'Type of Alteration',
-                            yaxisTitle: 'Acceptability',
-                            legendOrder: boxPlotLegendOrder,
-                            traceNameMap: traceNameMap
-                        },
-                        'ai-plot'
-                    );
-                    document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'block';
-                }
+                renderBoxPlot(backendData, comparisonType, sortBy);
             } else if (chartType === 'slope') {
-                if (comparisonType === 'human_ai') {
-                    const humanMeans = backendData.meansHuman['Human'] || {};
-                    const aiMeans = backendData.meansAI['AI'] || {};
-                    // Sort features for plotting
-                    const featureOrder = getFeatureSortOrder(sortBy,
-                        Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
-                        Object.entries(aiMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
-                    );
-                    window.makeSlopeChart(
-                        { 'Human': humanMeans },
-                        { 'AI': aiMeans },
-                        featureOrder,
-                        comparisonConfig.colorMap,
-                        ['Human', 'AI'],
-                        {
-                            title: 'Mean Acceptability (Human ● vs AI ○, individual responses shown as gray lines)',
-                            legendTitle: 'Type',
-                            groupOrder: ['Human', 'AI'],
-                            isGrouped: false,
-                            pairedData: backendData.pairedData || [] // Pass paired individual responses
-                        },
-                        'human-plot'
-                    );
-                    document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'none';
-                } else {
-                    // --- Slope chart logic for all other comparison types ---
-                    let groupMeansHuman = {};
-                    let groupMeansAI = {};
-                    let groupStdsHuman = {};
-                    let groupStdsAI = {};
-                    const legendWithCounts = [];
-                    const { groupOrder, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
-
-                    backendData.groups.forEach(rawGroup => {
-                        const displayName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
-                        const count = backendData.groupCounts && backendData.groupCounts[rawGroup] !== undefined ? backendData.groupCounts[rawGroup] : 0;
-                        legendWithCounts.push(`${displayName} (${count})`);
-
-                        groupMeansHuman[rawGroup] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
-                        groupMeansAI[rawGroup] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
-                        groupStdsHuman[rawGroup] = backendData.stdsHuman ? (backendData.stdsHuman[rawGroup] || {}) : {};
-                        groupStdsAI[rawGroup] = backendData.stdsAI ? (backendData.stdsAI[rawGroup] || {}) : {};
-                    });
-
-                    // Use meansHuman and meansAI to build arrays for getFeatureSortOrder
-                    const featureOrder = getFeatureSortOrder(sortBy,
-                        Object.entries(groupMeansHuman).flatMap(([Feature_Name, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v }))),
-                        Object.entries(groupMeansAI).flatMap(([Feature_Name, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v })))
-                    );
-                    window.makeSlopeChart(
-                        groupMeansHuman,
-                        groupMeansAI,
-                        featureOrder,
-                        colorMap,
-                        legendWithCounts,
-                        {
-                            title: `Mean Acceptability (Human \u25cf vs AI \u25cb)`,
-                            legendTitle: 'Group',
-                            traceNameMap: traceNameMap,
-                            groupOrder: groupOrder,
-                            isGrouped: true
-                        },
-                        'human-plot'
-                    );
-                    document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'none';
-                }
+                renderSlopeChart(backendData, comparisonType, sortBy);
             } else if (chartType === 'line') {
-                if (comparisonType === 'human_ai') {
-                    const humanMeans = backendData.means['Human'] || {};
-                    const aiMeans = backendData.means['AI'] || {};
-                    const humanStds = backendData.stdsHuman['Human'] || {};
-                    const aiStds = backendData.stdsAI['AI'] || {};
-                    // Sort features for plotting
-                    const featureOrder = getFeatureSortOrder(sortBy,
-                        Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
-                        Object.entries(aiMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
-                    );
-                    // Build traceNameMap for legend labels with counts
-                    const traceNameMap = {};
-                    const legendOrderWithCounts = [];
-                    ['Human', 'AI'].forEach(group => {
-                        const count = backendData.groupCounts && backendData.groupCounts[group] !== undefined ? backendData.groupCounts[group] : 0;
-                        traceNameMap[group] = `${group} (${count})`;
-                        legendOrderWithCounts.push(`${group} (${count})`);
-                    });
-                    window.makeLineChart(
-                        { 'Human': humanMeans, 'AI': aiMeans },
-                        featureOrder,
-                        comparisonConfig.colorMap,
-                        legendOrderWithCounts,
-                        {
-                            title: 'Mean Acceptability with ±1 Stdev Bands (Human ● vs AI ○)',
-                            legendTitle: 'Type',
-                            traceNameMap: traceNameMap,
-                            groupOrder: ['Human', 'AI'],  // Data lookup keys
-                            stdDevDict: { 'Human': humanStds, 'AI': aiStds }
-                        },
-                        'human-plot'
-                    );
-                    document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'none';
-                } else {
-                    // --- Line chart logic for all other comparison types ---
-                    let groupMeansHuman = {};
-                    let groupMeansAI = {};
-                    let groupStdsHuman = {};
-                    let groupStdsAI = {};
-                    const legendWithCounts = [];
-                    const { groupOrder, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
-
-                    backendData.groups.forEach(rawGroup => {
-                        const displayName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
-                        const count = backendData.groupCounts && backendData.groupCounts[rawGroup] !== undefined ? backendData.groupCounts[rawGroup] : 0;
-                        legendWithCounts.push(`${displayName} (${count})`);
-
-                        groupMeansHuman[rawGroup] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
-                        groupMeansAI[rawGroup] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
-                        groupStdsHuman[rawGroup] = backendData.stdsHuman ? (backendData.stdsHuman[rawGroup] || {}) : {};
-                        groupStdsAI[rawGroup] = backendData.stdsAI ? (backendData.stdsAI[rawGroup] || {}) : {};
-                    });
-
-                    // Use meansHuman and meansAI to build arrays for getFeatureSortOrder
-                    const featureOrder = getFeatureSortOrder(sortBy,
-                        Object.entries(groupMeansHuman).flatMap(([Feature_Name, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v }))),
-                        Object.entries(groupMeansAI).flatMap(([Feature_Name, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v })))
-                    );
-                    window.makeLineChart(
-                        groupMeansHuman,
-                        featureOrder,
-                        colorMap,
-                        legendWithCounts,
-                        {
-                            title: `Mean Acceptability for Human Alteration (±1 Stdev Bands)`,
-                            legendTitle: 'Group',
-                            traceNameMap: traceNameMap,
-                            groupOrder: groupOrder,
-                            isGrouped: true,
-                            stdDevDict: groupStdsHuman
-                        },
-                        'human-plot'
-                    );
-                    window.makeLineChart(
-                        groupMeansAI,
-                        featureOrder,
-                        colorMap,
-                        legendWithCounts,
-                        {
-                            title: `Mean Acceptability for AI Alteration (±1 Stdev Bands)`,
-                            legendTitle: 'Group',
-                            forceAIStyle: true,
-                            traceNameMap: traceNameMap,
-                            groupOrder: groupOrder,
-                            stdDevDict: groupStdsAI
-                        },
-                        'ai-plot'
-                    );
-                    document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'block';
-                }
+                renderLineChart(backendData, comparisonType, sortBy);
             } else if (chartType === 'swarm') {
-                const comparisonLabel = getComparisonLabel(comparisonType);
-                if (comparisonType === 'human_ai') {
-                    const combined = [];
-                    backendData.groups.forEach(group => {
-                        backendData.features.forEach(feat => {
-                            (backendData.data[feat][group] || []).forEach(score => {
-                                combined.push({
-                                    Feature_Name: feat,
-                                    Numerical_Score: score,
-                                    Type: group
-                                });
-                            });
-                        });
-                    });
-                    const featureOrder = getFeatureSortOrder(sortBy, combined.filter(r => r.Type === 'Human'), combined.filter(r => r.Type === 'AI'));
-                    window.makeSwarmPlot(
-                        combined,
-                        'Feature_Name',
-                        'Numerical_Score',
-                        'Type',
-                        {
-                            title: `Swarm Plot: Acceptability of Human vs AI Alterations`,
-                            colorMap: comparisonConfig.colorMap,
-                            categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
-                            xaxisTitle: 'Type of Alteration',
-                            yaxisTitle: 'Acceptability',
-                            traceNameMap: { 'Human': 'Human', 'AI': 'AI' }
-                        },
-                        'human-plot'
-                    );
-                    document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'none';
-                } else {
-                    const combinedHuman = [];
-                    const combinedAI = [];
-                    const { groupOrder, groupKey, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
-
-                    backendData.groups.forEach(rawGroup => {
-                        if (rawGroup === undefined || rawGroup === null || String(rawGroup).trim().toLowerCase() === 'nan' || String(rawGroup).trim() === '') return;
-                        const shortName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
-                        backendData.features.forEach(feat => {
-                            const valuesH = (backendData.dataHuman[feat] && backendData.dataHuman[feat][rawGroup]) ? backendData.dataHuman[feat][rawGroup] : [];
-                            valuesH.forEach(score => {
-                                combinedHuman.push({
-                                    Feature_Name: feat,
-                                    Numerical_Score: score,
-                                    Group: rawGroup,
-                                    ShortGroup: shortName
-                                });
-                            });
-                            const valuesA = (backendData.dataAI[feat] && backendData.dataAI[feat][rawGroup]) ? backendData.dataAI[feat][rawGroup] : [];
-                            valuesA.forEach(score => {
-                                combinedAI.push({
-                                    Feature_Name: feat,
-                                    Numerical_Score: score,
-                                    Group: rawGroup,
-                                    ShortGroup: shortName
-                                });
-                            });
-                        });
-                    });
-
-                    const featureOrder = getFeatureSortOrder(sortBy, combinedHuman, combinedAI);
-                    window.makeSwarmPlot(
-                        combinedHuman,
-                        'Feature_Name',
-                        'Numerical_Score',
-                        groupKey,
-                        {
-                            title: `Swarm Plot: Acceptability of Human Alterations by ${comparisonLabel}`,
-                            colorMap: colorMap || generateColorScale(groupOrder),
-                            categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                            xaxisTitle: 'Type of Alteration',
-                            yaxisTitle: 'Acceptability',
-                            traceNameMap: traceNameMap
-                        },
-                        'human-plot'
-                    );
-                    window.makeSwarmPlot(
-                        combinedAI,
-                        'Feature_Name',
-                        'Numerical_Score',
-                        groupKey,
-                        {
-                            title: `Swarm Plot: Acceptability of AI Alterations by ${comparisonLabel}`,
-                            colorMap: colorMap || generateColorScale(groupOrder),
-                            categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                            xaxisTitle: 'Type of Alteration',
-                            yaxisTitle: 'Acceptability',
-                            traceNameMap: traceNameMap
-                        },
-                        'ai-plot'
-                    );
-                    document.getElementById('human-plot').style.display = 'block';
-                    document.getElementById('ai-plot').style.display = 'block';
-                }
+                renderSwarmPlot(backendData, comparisonType, sortBy);
             } else {
                 document.getElementById('human-plot').innerHTML = '<div style="text-align:center;padding:2em;">Not implemented yet.</div>';
                 document.getElementById('human-plot').style.display = 'block';
@@ -633,37 +694,35 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Fetch aggregated data from backend ---
-    async function fetchAggregatedData() {
-            const { chartType, comparisonType, sortBy } = getSelections();
-            const url = `${API_URL}?chartType=${encodeURIComponent(chartType)}&comparisonType=${encodeURIComponent(comparisonType)}&sortBy=${encodeURIComponent(sortBy)}`;
-            showSpinner();
-            try {
-                const response = await fetch(url);
-                if (!response.ok) throw new Error('Network response was not ok');
-                const data = await response.json();
-                backendData = data;
-                updatePlots();
-            } catch (err) {
-                document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">Error fetching data: ${err.message}</div>`;
-                document.getElementById('human-plot').style.display = 'block';
-                document.getElementById('ai-plot').style.display = 'none';
-                backendData = null;
-            } finally {
-                hideSpinner();
-            }
+    async function refreshBackendData() {
+        const { chartType, comparisonType } = getSelections();
+        showSpinner();
+        try {
+            const data = await fetchAggregatedData(chartType, comparisonType);
+            validateBackendDataShape(data, chartType);
+            backendData = data;
+            updatePlots();
+        } catch (err) {
+            document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">Error fetching data: ${err.message}</div>`;
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            backendData = null;
+        } finally {
+            hideSpinner();
+        }
     }
 
     // --- Event listeners ---
 
     // Only fetch data when chart-type or comparison-type changes
-    document.getElementById('chart-type').addEventListener('change', fetchAggregatedData);
-    document.getElementById('comparison-type').addEventListener('change', fetchAggregatedData);
+    document.getElementById('chart-type').addEventListener('change', refreshBackendData);
+    document.getElementById('comparison-type').addEventListener('change', refreshBackendData);
     // Only re-sort and re-plot when sort-by changes (no backend call)
     document.getElementById('sort-by').addEventListener('change', function() {
         updatePlots();
     });
 
     // Initial load
-    fetchAggregatedData();
+    refreshBackendData();
 
 });

@@ -5,7 +5,6 @@
  * Query Parameters:
  *   chartType: 'box' | 'line' (default: 'box')
  *   comparisonType: e.g., 'human_ai', 'role', etc. (default: 'human_ai')
- *   sortBy: e.g., 'human_mean' (default: 'human_mean') — currently reserved for frontend sorting and not used by backend aggregation
  *
  * Returns:
  *   JSON object with only aggregated data (box plot or line chart aggregations).
@@ -22,7 +21,6 @@ function doGet(e) {
   // Query parameters
   const chartType = e.parameter.chartType || 'box';
   const comparisonType = e.parameter.comparisonType || 'human_ai';
-  const sortBy = e.parameter.sortBy || 'human_mean';
 
   // Clean and structure data
   const data = cleanData(values);
@@ -30,13 +28,13 @@ function doGet(e) {
   // Aggregation (NO RAW DATA RETURNED)
   let result = {};
   if (chartType === 'box') {
-    result = aggregateBoxPlot(data, comparisonType, sortBy);
+    result = aggregateBoxPlot(data, comparisonType);
   } else if (chartType === 'line') {
-    result = aggregateLineChart(data, comparisonType, sortBy);
+    result = aggregateLineChart(data, comparisonType);
   } else if (chartType === 'slope') {
-    result = aggregateSlopeChart(data, comparisonType, sortBy);
+    result = aggregateSlopeChart(data, comparisonType);
   } else if (chartType === 'swarm') { // Add swarm chart type
-    result = aggregateSwarmPlot(data, comparisonType, sortBy);
+    result = aggregateSwarmPlot(data, comparisonType);
   } else {
     result = {error: 'Chart type not implemented.'};
   }
@@ -93,12 +91,12 @@ function getComparisonLabel(comparisonType) {
  * GET endpoint (doGet):
  *   - chartType: 'box', 'line', or 'slope'
  *   - comparisonType: 'human_ai', 'role', 'experience', 'frequency_vis', 'frequency_public', 'domain', 'age', 'tool_use'
- *   - sortBy: (optional, for future use)
  *
  * Returns:
- *   For 'box': { features, groups, data } (aggregated scores per group/feature)
- *   For 'line': { features, groups, means } (mean scores per group/feature)
- *   For 'slope': { features, groups, meansHuman, meansAI } (mean scores for both human and AI)
+ *   For 'box': { features, groups, data, humanGroups, aiGroups, groupCounts }
+ *   For 'line': { features, groups, means, meansHuman, meansAI, stdsHuman, stdsAI, groupCounts }
+ *   For 'slope': { features, groups, meansHuman, meansAI, groupCounts, pairedData }
+ *   For 'swarm': { features, groups, data, dataHuman, dataAI, humanGroups, aiGroups, groupCounts }
  *
  * This API will NEVER return raw or row-level data, in compliance with IRB requirements.
  */
@@ -163,7 +161,7 @@ function cleanData(values) {
 }
 
 // --- Aggregation for Swarm Plot ---
-function aggregateSwarmPlot(data, comparisonType, sortBy) {
+function aggregateSwarmPlot(data, comparisonType) {
   const output = {
     features: FEATURES,
     groups: [],
@@ -218,7 +216,7 @@ function aggregateSwarmPlot(data, comparisonType, sortBy) {
 
 // --- Aggregation for Box Plot ---
 // Returns only aggregated data for box plots (never raw data)
-function aggregateBoxPlot(data, comparisonType, sortBy) {
+function aggregateBoxPlot(data, comparisonType) {
   // Prepare output structure
   const output = {
     features: FEATURES,
@@ -273,7 +271,7 @@ function aggregateBoxPlot(data, comparisonType, sortBy) {
 
 // --- Aggregation for Line Chart (Means and Standard Deviations) ---
 // Returns only aggregated means and standard deviations for line charts (never raw data)
-function aggregateLineChart(data, comparisonType, sortBy) {
+function aggregateLineChart(data, comparisonType) {
   // Prepare output structure
   const output = {
     features: FEATURES,
@@ -320,7 +318,7 @@ function aggregateLineChart(data, comparisonType, sortBy) {
 // --- Aggregation for Slope Chart (Means) ---
 // Returns only aggregated means for slope charts (never raw data)
 // Same structure as line chart but can be used to show Human vs AI on same chart
-function aggregateSlopeChart(data, comparisonType, sortBy) {
+function aggregateSlopeChart(data, comparisonType) {
   // Prepare output structure (same as line chart)
   const output = {
     features: FEATURES,
@@ -426,14 +424,14 @@ function getGroupsAndCounts(data, comparisonType) {
   if (comparisonColumn === 'Domains') {
     groups = Array.from(new Set(data.flatMap(d => normalizeDomains(d['Domains']))));
   } else {
-    groups = Array.from(new Set(data.map(d => d[comparisonColumn])));
+    groups = Array.from(new Set(data.map(d => normalizeGroupValue(d[comparisonColumn])).filter(v => v !== null)));
   }
   const groupCounts = {};
   groups.forEach(group => {
     if (comparisonColumn === 'Domains') {
       groupCounts[group] = data.filter(d => normalizeDomains(d['Domains']).includes(group)).length;
     } else {
-      groupCounts[group] = data.filter(d => d[comparisonColumn] === group).length;
+      groupCounts[group] = data.filter(d => normalizeGroupValue(d[comparisonColumn]) === group).length;
     }
   });
   return { groups, groupCounts };
@@ -457,6 +455,12 @@ function normalizeDomains(domains) {
     return domains.split(',').map(value => value.trim()).filter(value => value);
   }
   return [];
+}
+
+function normalizeGroupValue(value) {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value).trim();
+  return normalized === '' ? null : normalized;
 }
 
 function matchesGroup(row, comparisonType, group) {
