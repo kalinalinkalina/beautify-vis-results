@@ -675,4 +675,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Backend API endpoint for aggregated data
-const API_URL = 'https://script.google.com/macros/s/AKfycbxkS_1zbPPw0uWhnp6abeclW4rKhWqMc06MjiC83YqHa-lcVjMMEOHuPl9ch-Zga-Gb/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzed7aTbsJ6ZqibTeWoyRIv-Wp1mJllNMzPSFw64Ju0naXl7l6QW6KxAj98R_AdzaCs/exec';

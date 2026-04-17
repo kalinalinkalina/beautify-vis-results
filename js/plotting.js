@@ -18,6 +18,69 @@ function resolvePlotContainer(container) {
     return plotContainer;
 }
 
+function orderTracesByLegend(traces, legendOrder) {
+    if (!Array.isArray(legendOrder) || legendOrder.length === 0) return traces;
+    const fallback = [];
+    const ordered = [];
+
+    traces.forEach(trace => {
+        if (trace.name && legendOrder.includes(trace.name)) return;
+        fallback.push(trace);
+    });
+
+    legendOrder.forEach(name => {
+        traces.filter(t => t.name === name).forEach(trace => ordered.push(trace));
+    });
+
+    return [...fallback, ...ordered];
+}
+
+function getPlotlyLegendConfig(legendOptions = {}) {
+    return Object.assign({
+        orientation: 'v',
+        x: 1,
+        xanchor: 'left',
+        y: 1,
+        yanchor: 'top'
+    }, legendOptions);
+}
+
+function getMarkerSymbol(group) {
+    if (isScientistGroup(group)) return 'square';
+    if (typeof group === 'string' && group.trim().toLowerCase() === 'never') return 'x';
+    return 'circle';
+}
+
+function buildYAxisConfig(title, yTickVals, yTickText, anchorToX = false) {
+    const config = {
+        title,
+        tickmode: 'array',
+        tickvals: yTickVals,
+        ticktext: yTickText,
+        range: [-0.5, 5.5]
+    };
+    if (anchorToX) {
+        config.scaleanchor = 'x';
+        config.scaleratio = 1;
+    }
+    return config;
+}
+
+function buildXAxisConfig(title, tickvals, ticktext, tickangle = 30, type = 'linear', range = null) {
+    const config = {
+        title,
+        type,
+        tickmode: 'array',
+        tickvals,
+        ticktext,
+        tickangle
+    };
+    if (range) {
+        config.range = range;
+    }
+    return config;
+}
+
 // Plotting utilities for dashboard (using Plotly.js)
 
 /**
@@ -169,7 +232,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             const v = groupData && groupData.hasOwnProperty(f) ? groupData[f] : null;
             return (v !== null && v !== undefined && !Number.isNaN(v)) ? v : null;
         });
-        let markerSymbol = safeMarkerSymbols[group] || 'circle';
+        let markerSymbol = safeMarkerSymbols[group] || getMarkerSymbol(group);
         // Force squares for scientist groups
         if (isScientistGroup(group)) {
             markerSymbol = 'square';
@@ -220,36 +283,45 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 return null;
             });
 
-            // Use the same X values as the line chart to ensure perfect alignment for 'tonexty'
+            // Use the same X values as the line chart to ensure perfect alignment for the filled band
             const bandX = featureOrder;
             const bandUpper = featureOrder.map((_, idx) => upperVals[idx] !== null ? upperVals[idx] : null);
             const bandLower = featureOrder.map((_, idx) => lowerVals[idx] !== null ? lowerVals[idx] : null);
 
-            const lowerTrace = {
-                type: 'scatter',
-                x: bandX,
-                y: bandLower,
-                mode: 'lines',
-                line: { color: 'rgba(0,0,0,0.1)', width: 0.5 }, // Faint line instead of transparent
-                showlegend: false,
-                hoverinfo: 'none',
-                connectgaps: true,
-                legendgroup: group // Link visibility to the group
-            };
-            const upperTrace = {
-                type: 'scatter',
-                x: bandX,
-                y: bandUpper,
-                fill: 'tonexty',
-                fillcolor: colorToRgba(legendColors[group] || '#999', 0.10), // Set opacity to 10%
-                line: { color: 'rgba(0,0,0,0.1)', width: 0.5 },
-                mode: 'lines',
-                showlegend: false,
-                hoverinfo: 'none',
-                connectgaps: true,
-                legendgroup: group // Link visibility to the group
-            };
-            bandTraces.push(lowerTrace, upperTrace);
+            const bandSegments = [];
+            let currentSegment = { x: [], upper: [], lower: [] };
+            for (let idx = 0; idx < bandX.length; idx++) {
+                if (bandUpper[idx] !== null && bandLower[idx] !== null) {
+                    currentSegment.x.push(bandX[idx]);
+                    currentSegment.upper.push(bandUpper[idx]);
+                    currentSegment.lower.push(bandLower[idx]);
+                } else if (currentSegment.x.length > 0) {
+                    bandSegments.push(currentSegment);
+                    currentSegment = { x: [], upper: [], lower: [] };
+                }
+            }
+            if (currentSegment.x.length > 0) {
+                bandSegments.push(currentSegment);
+            }
+
+            bandSegments.forEach(segment => {
+                const bandTrace = {
+                    type: 'scatter',
+                    x: [...segment.x, ...segment.x.slice().reverse()],
+                    y: [...segment.upper, ...segment.lower.slice().reverse()],
+                    fill: 'toself',
+                    fillcolor: colorToRgba(legendColors[group] || '#999', 0.10),
+                    line: { color: 'transparent', width: 0 },
+                    mode: 'lines',
+                    showlegend: false,
+                    hoverinfo: 'none',
+                    connectgaps: true,
+                    legendgroup: group,
+                    layer: 'below',
+                    isConfidenceBand: true
+                };
+                bandTraces.push(bandTrace);
+            });
         }
         
         const lineTrace = {
@@ -260,18 +332,34 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             line: { color: legendColors[group] || undefined, width: 2 },
             marker: marker,
             connectgaps: true,
-            legendgroup: group // Link visibility to the group
+            legendgroup: group, // Link visibility to the group
+            layer: 'above',
+            isConfidenceBand: false
         };
         lineTraces.push(lineTrace);
+        const lineOverlayTrace = {
+            x: xVals,
+            y: yVals,
+            type: 'scatter',
+            mode: 'lines',
+            line: { color: legendColors[group] || undefined, width: 3 },
+            connectgaps: true,
+            showlegend: false,
+            hoverinfo: 'skip',
+            legendgroup: group,
+            layer: 'above',
+            isConfidenceBand: false
+        };
+        lineTraces.push(lineOverlayTrace);
     });
 
     const traces = [...bandTraces, ...lineTraces];
-    
-    // Temporarily bypass filterValidTraces to ensure all traces are passed to Plotly
-    const filteredTraces = traces; // Bypass filtering
-    
-    // Build the legend category array from actual trace names (which may have counts)
-    const legendCategoryArray = filteredTraces.filter(trace => trace.showlegend !== false).map(trace => trace.name);
+    let filteredTraces = window.filterValidTraces(traces);
+    if (filteredTraces.length === 0) return;
+    const bandTracesOnly = filteredTraces.filter(t => t.isConfidenceBand);
+    const lineTracesOnly = filteredTraces.filter(t => !t.isConfidenceBand);
+    const sortedLineTraces = orderTracesByLegend(lineTracesOnly, legendOrder);
+    filteredTraces = [...bandTracesOnly, ...sortedLineTraces];
     
     let layout;
     if (sharedLayout) {
@@ -291,26 +379,9 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
         const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
         layout = {
             title,
-            xaxis: {
-                title: 'Type of Alteration',
-                tickangle: 30,
-                tickvals: xTickVals,
-                ticktext: xTickText
-            },
-            yaxis: {
-                title: 'Acceptability',
-                tickmode: 'array',
-                tickvals: yTickVals,
-                ticktext: yTickText,
-                range: [-0.5, 5.5]
-            },
-            legend: {
-                orientation: 'v',
-                x: 1,
-                xanchor: 'left',
-                y: 1,
-                yanchor: 'top'
-            },
+            xaxis: buildXAxisConfig('Type of Alteration', xTickVals, xTickText, 30, 'category'),
+            yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
+            legend: getPlotlyLegendConfig(),
             height: 500,
             margin: { r: 180 }
         };
@@ -376,12 +447,9 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
         });
     }
 
-    const featureXPositions = {}; // Map feature to x-axis position
-    
     // 2. Draw mean slopes (connected markers)
     featureOrder.forEach((feature, featureIdx) => {
         const featureX = featureIdx;
-        featureXPositions[feature] = featureX;
         
         if (isGrouped) {
             // For grouped comparisons: create separate slopes for each group
@@ -406,10 +474,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 });
 
                 // Add human marker (filled)
-                let markerSymbol = safeMarkerSymbols[group] || 'circle';
-                if (isScientistGroup(group)) {
-                    markerSymbol = 'square';
-                }
+                let markerSymbol = safeMarkerSymbols[group] || getMarkerSymbol(group);
                 if (xMarkerGroups.includes(group)) {
                     markerSymbol = 'x';
                 }
@@ -510,37 +575,16 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     
     const layout = {
         title,
-        xaxis: {
-            title: 'Type of Alteration',
-            type: 'linear',
-            tickangle: 30,
-            tickvals: featureOrder.map((_, i) => i),
-            ticktext: xTickText,
-            range: [-0.5, featureOrder.length - 0.5]
-        },
-        yaxis: {
-            title: 'Acceptability',
-            tickmode: 'array',
-            tickvals: yTickVals,
-            ticktext: yTickText,
-            range: [-0.5, 5.5],
-            scaleanchor: 'x',
-            scaleratio: 1
-        },
-        legend: {
-            orientation: 'v',
-            x: 1,
-            xanchor: 'left',
-            y: 1,
-            yanchor: 'top'
-        },
-        height: 500,
+        xaxis: buildXAxisConfig('Type of Alteration', featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
+        yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
+        legend: getPlotlyLegendConfig(),
         margin: { r: 180 },
         hovermode: 'closest'
     };
+    const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, traces, layout, {responsive: true});
+    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
 }
 
 /**
@@ -561,6 +605,7 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         xaxisTitle = '',
         yaxisTitle = '',
         traceNameMap = {},
+        legendOrder = null,
         jitterAmplitude = 0.54,
         markerSize = 7,
         markerOpacity = 0.65
@@ -625,38 +670,16 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
     const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
     const layout = {
         title,
-        xaxis: {
-            title: xaxisTitle,
-            type: 'linear',
-            tickmode: 'array',
-            tickvals: featureOrder.map((_, i) => i),
-            ticktext: xTickText,
-            tickangle: 30,
-            range: [-0.5, featureOrder.length - 0.5]
-        },
-        yaxis: {
-            title: yaxisTitle,
-            tickmode: 'array',
-            tickvals: yTickVals,
-            ticktext: yTickText,
-            range: [-0.5, 5.5],
-            scaleanchor: 'x',
-            scaleratio: 1
-        },
-        legend: {
-            orientation: 'v',
-            x: 1,
-            xanchor: 'left',
-            y: 1,
-            yanchor: 'top',
-            traceorder: legendTraceOrder
-        },
+        xaxis: buildXAxisConfig(xaxisTitle, featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
+        yaxis: buildYAxisConfig(yaxisTitle, yTickVals, yTickText, true),
+        legend: getPlotlyLegendConfig({ traceorder: legendTraceOrder }),
         margin: { r: 180 },
         hovermode: 'closest'
     };
+    const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, traces, layout, { responsive: true });
+    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
 }
 
 // Human-readable feature name mapping (should match Python FEATURE_LABELS)
