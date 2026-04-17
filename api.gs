@@ -139,10 +139,6 @@ function getComparisonColumn(comparisonType) {
   return (COMPARISON_CONFIG[comparisonType] && COMPARISON_CONFIG[comparisonType].column) || comparisonType;
 }
 
-function getComparisonLabel(comparisonType) {
-  return (COMPARISON_CONFIG[comparisonType] && COMPARISON_CONFIG[comparisonType].label) || comparisonType;
-}
-
 /**
  * API Documentation:
  *
@@ -234,52 +230,122 @@ function hasAnyContextResponse(row, viewConfig) {
   return viewConfig.features.some(feature => hasContextResponseForFeature(row, feature, viewConfig.valueMap));
 }
 
-function aggregateContextBoxPlot(data, comparisonType, view) {
+function buildContextScoreMap(data, comparisonType, viewConfig) {
+  const groupsAndCounts = getContextGroupsAndCounts(data, comparisonType, viewConfig);
+  const groups = groupsAndCounts.groups;
+  const groupCounts = groupsAndCounts.groupCounts;
+  const scoreMap = {};
+
+  groups.forEach(group => {
+    scoreMap[group] = {};
+    viewConfig.features.forEach(feature => {
+      scoreMap[group][feature] = collectContextScores(data, comparisonType, group, feature, viewConfig);
+    });
+  });
+
+  return { groups, groupCounts, scoreMap };
+}
+
+function buildAlterationScoreMap(data, comparisonType) {
+  const groupsAndCounts = getGroupsAndCounts(data, comparisonType);
+  const groups = groupsAndCounts.groups;
+  const groupCounts = groupsAndCounts.groupCounts;
+  const scoreMap = {};
+
+  groups.forEach(group => {
+    scoreMap[group] = {};
+    FEATURES.forEach(feature => {
+      scoreMap[group][feature] = collectScores(data, comparisonType, group, feature);
+    });
+  });
+
+  return { groups, groupCounts, scoreMap };
+}
+
+function getPrimaryAlterationScores(scores, comparisonType, group) {
+  if (comparisonType === 'human_ai') {
+    return group === 'Human' ? scores.human : scores.ai;
+  }
+  if (comparisonType === 'summary') {
+    return scores.human.concat(scores.ai);
+  }
+  return scores.human;
+}
+
+function buildHumanAiPairedData(data) {
+  const pairedData = [];
+
+  data.forEach(row => {
+    const pair = { human: {}, ai: {} };
+    let hasHuman = false;
+    let hasAI = false;
+
+    FEATURES.forEach(feature => {
+      const humanValue = LIKERT_MAP[row['Acceptability_Human_' + feature]];
+      const aiValue = LIKERT_MAP[row['Acceptability_AI_' + feature]];
+
+      if (isValidScore(humanValue)) {
+        pair.human[feature] = humanValue;
+        hasHuman = true;
+      }
+      if (isValidScore(aiValue)) {
+        pair.ai[feature] = aiValue;
+        hasAI = true;
+      }
+    });
+
+    if (hasHuman || hasAI) {
+      pairedData.push(pair);
+    }
+  });
+
+  return pairedData;
+}
+
+function aggregateContextScorePlot(data, comparisonType, view) {
   const viewConfig = getContextViewConfig(view);
+  const { groups, groupCounts, scoreMap } = buildContextScoreMap(data, comparisonType, viewConfig);
   const output = {
     features: viewConfig.features,
-    groups: [],
+    groups,
     data: {},
-    groupCounts: {}
+    groupCounts
   };
-
-  const groupsAndCounts = getContextGroupsAndCounts(data, comparisonType, viewConfig);
-  output.groups = groupsAndCounts.groups;
-  output.groupCounts = groupsAndCounts.groupCounts;
 
   viewConfig.features.forEach(feature => {
     output.data[feature] = {};
-    output.groups.forEach(group => {
-      output.data[feature][group] = collectContextScores(data, comparisonType, group, feature, viewConfig);
+    groups.forEach(group => {
+      output.data[feature][group] = scoreMap[group][feature];
     });
   });
 
   return output;
 }
 
+function aggregateContextBoxPlot(data, comparisonType, view) {
+  return aggregateContextScorePlot(data, comparisonType, view);
+}
+
 function aggregateContextSwarmPlot(data, comparisonType, view) {
-  return aggregateContextBoxPlot(data, comparisonType, view);
+  return aggregateContextScorePlot(data, comparisonType, view);
 }
 
 function aggregateContextLineChart(data, comparisonType, view) {
   const viewConfig = getContextViewConfig(view);
+  const { groups, groupCounts, scoreMap } = buildContextScoreMap(data, comparisonType, viewConfig);
   const output = {
     features: viewConfig.features,
-    groups: [],
+    groups,
     means: {},
     stds: {},
-    groupCounts: {}
+    groupCounts
   };
 
-  const groupsAndCounts = getContextGroupsAndCounts(data, comparisonType, viewConfig);
-  output.groups = groupsAndCounts.groups;
-  output.groupCounts = groupsAndCounts.groupCounts;
-
-  output.groups.forEach(group => {
+  groups.forEach(group => {
     output.means[group] = {};
     output.stds[group] = {};
     viewConfig.features.forEach(feature => {
-      const scores = collectContextScores(data, comparisonType, group, feature, viewConfig);
+      const scores = scoreMap[group][feature];
       output.means[group][feature] = calculateMean(scores);
       output.stds[group][feature] = calculateStdDev(scores);
     });
@@ -290,22 +356,17 @@ function aggregateContextLineChart(data, comparisonType, view) {
 
 // --- Aggregation for Swarm Plot ---
 function aggregateSwarmPlot(data, comparisonType) {
+  const { groups, groupCounts, scoreMap } = buildAlterationScoreMap(data, comparisonType);
   const output = {
     features: FEATURES,
-    groups: [],
+    groups,
     data: {},
     dataHuman: {},
     dataAI: {},
     humanGroups: [],
     aiGroups: [],
-    groupCounts: {}
+    groupCounts
   };
-
-  const groupsAndCounts = getGroupsAndCounts(data, comparisonType);
-  const groups = groupsAndCounts.groups;
-  const groupCounts = groupsAndCounts.groupCounts;
-  output.groups = groups;
-  output.groupCounts = groupCounts;
 
   if (comparisonType === 'human_ai') {
     output.humanGroups = ['Human'];
@@ -328,14 +389,8 @@ function aggregateSwarmPlot(data, comparisonType) {
 
   groups.forEach(group => {
     FEATURES.forEach(feature => {
-      const scores = collectScores(data, comparisonType, group, feature);
-      if (comparisonType === 'human_ai') {
-        output.data[feature][group] = scores[group === 'Human' ? 'human' : 'ai'];
-      } else if (comparisonType === 'summary') {
-        output.data[feature][group] = scores.human.concat(scores.ai);
-      } else {
-        output.data[feature][group] = scores.human;
-      }
+      const scores = scoreMap[group][feature];
+      output.data[feature][group] = getPrimaryAlterationScores(scores, comparisonType, group);
       output.dataHuman[feature][group] = scores.human;
       output.dataAI[feature][group] = scores.ai;
     });
@@ -347,22 +402,17 @@ function aggregateSwarmPlot(data, comparisonType) {
 // --- Aggregation for Box Plot ---
 // Returns only aggregated data for box plots (never raw data)
 function aggregateBoxPlot(data, comparisonType) {
+  const { groups, groupCounts, scoreMap } = buildAlterationScoreMap(data, comparisonType);
   // Prepare output structure
   const output = {
     features: FEATURES,
-    groups: [],
+    groups,
     data: {},
     humanGroups: [],
     aiGroups: [],
-    groupCounts: {} // <-- add groupCounts to output
+    groupCounts
   };
 
-  // Determine groups and group counts
-  const groupsAndCounts = getGroupsAndCounts(data, comparisonType);
-  const groups = groupsAndCounts.groups;
-  const groupCounts = groupsAndCounts.groupCounts;
-  output.groups = groups;
-  output.groupCounts = groupCounts;
   if (comparisonType === 'human_ai') {
     output.humanGroups = ['Human'];
     output.aiGroups = ['AI'];
@@ -380,13 +430,9 @@ function aggregateBoxPlot(data, comparisonType) {
       output.data[group + '__AI'] = {};
     }
     FEATURES.forEach(feat => {
-      const scores = collectScores(data, comparisonType, group, feat);
-      if (comparisonType === 'human_ai') {
-        output.data[group][feat] = scores[group === 'Human' ? 'human' : 'ai'];
-      } else if (comparisonType === 'summary') {
-        output.data[group][feat] = scores.human.concat(scores.ai);
-      } else {
-        output.data[group][feat] = scores.human;
+      const scores = scoreMap[group][feat];
+      output.data[group][feat] = getPrimaryAlterationScores(scores, comparisonType, group);
+      if (comparisonType !== 'human_ai' && comparisonType !== 'summary') {
         output.data[group + '__AI'][feat] = scores.ai;
       }
     });
@@ -404,24 +450,18 @@ function aggregateBoxPlot(data, comparisonType) {
 // --- Aggregation for Line Chart (Means and Standard Deviations) ---
 // Returns only aggregated means and standard deviations for line charts (never raw data)
 function aggregateLineChart(data, comparisonType) {
+  const { groups, groupCounts, scoreMap } = buildAlterationScoreMap(data, comparisonType);
   // Prepare output structure
   const output = {
     features: FEATURES,
-    groups: [],
+    groups,
     means: {},
     meansHuman: {},
     meansAI: {},
     stdsHuman: {},
     stdsAI: {},
-    groupCounts: {} // <-- add groupCounts to output
+    groupCounts
   };
-
-  // Determine groups and group counts
-  const groupsAndCounts = getGroupsAndCounts(data, comparisonType);
-  const groups = groupsAndCounts.groups;
-  const groupCounts = groupsAndCounts.groupCounts;
-  output.groups = groups;
-  output.groupCounts = groupCounts;
 
   // No feature sorting here; handled on frontend
 
@@ -433,7 +473,7 @@ function aggregateLineChart(data, comparisonType) {
     output.stdsHuman[group] = {};
     output.stdsAI[group] = {};
     FEATURES.forEach(feat => {
-      const scores = collectScores(data, comparisonType, group, feat);
+      const scores = scoreMap[group][feat];
       if (comparisonType === 'summary') {
         const combined = scores.human.concat(scores.ai);
         output.means[group][feat] = calculateMean(combined);
@@ -467,59 +507,21 @@ function aggregateLineChart(data, comparisonType) {
 // Returns only aggregated means for slope charts (never raw data)
 // Same structure as line chart but can be used to show Human vs AI on same chart
 function aggregateSlopeChart(data, comparisonType) {
+  const { groups, groupCounts, scoreMap } = buildAlterationScoreMap(data, comparisonType);
   // Prepare output structure (same as line chart)
   const output = {
     features: FEATURES,
-    groups: [],
+    groups,
     meansHuman: {},
     meansAI: {},
     stdsHuman: {},
     stdsAI: {},
-    groupCounts: {},
+    groupCounts,
     pairedData: [] // For individual responses in Human vs AI
   };
 
-  // Determine groups and group counts
-  const groupsAndCounts = getGroupsAndCounts(data, comparisonType);
-  const groups = groupsAndCounts.groups;
-  const groupCounts = groupsAndCounts.groupCounts;
-  output.groups = groups;
-  output.groupCounts = groupCounts;
-
   if (comparisonType === 'human_ai') {
-    output.pairedData = [];
-    groups.forEach(group => {
-      if (group === 'Human') {
-        output.groupCounts['Human'] = getResponseGroupCount(data, 'Acceptability_Human_');
-      } else if (group === 'AI') {
-        output.groupCounts['AI'] = getResponseGroupCount(data, 'Acceptability_AI_');
-      }
-    });
-
-    // Collect paired individual responses for Human vs AI
-    data.forEach(d => {
-      const pair = { human: {}, ai: {} };
-      let hasHuman = false;
-      let hasAI = false;
-      FEATURES.forEach(feat => {
-        const hVal = LIKERT_MAP[d['Acceptability_Human_' + feat]];
-        const aVal = LIKERT_MAP[d['Acceptability_AI_' + feat]];
-        if (hVal !== undefined && hVal !== null && hVal !== '') {
-          pair.human[feat] = hVal;
-          hasHuman = true;
-        }
-        if (aVal !== undefined && aVal !== null && aVal !== '') {
-          pair.ai[feat] = aVal;
-          hasAI = true;
-        }
-      });
-      if (hasHuman || hasAI) {
-        output.pairedData.push(pair);
-      }
-    });
-  } else {
-    output.groups = groups;
-    output.groupCounts = groupCounts;
+    output.pairedData = buildHumanAiPairedData(data);
   }
 
   // No feature sorting here; handled on frontend
@@ -531,7 +533,7 @@ function aggregateSlopeChart(data, comparisonType) {
     output.stdsHuman[group] = {};
     output.stdsAI[group] = {};
     FEATURES.forEach(feat => {
-      const scores = collectScores(data, comparisonType, group, feat);
+      const scores = scoreMap[group][feat];
       if (comparisonType === 'summary') {
         const combined = scores.human.concat(scores.ai);
         output.meansHuman[group][feat] = calculateMean(combined);

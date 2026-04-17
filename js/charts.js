@@ -174,8 +174,6 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const xTickAngle = options.xTickAngle ?? 30;
     const responseScale = options.responseScale || 'acceptability';
     featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
-    const pairedData = options.pairedData || [];
-
     function colorToRgba(color, alpha) {
         if (!color) {
             return `rgba(153, 153, 153, ${alpha})`;
@@ -508,7 +506,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
         }
     });
 
-    const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(featureOrder, window.FEATURE_LABELS || {});
+    const { ticktext: xTickText } = window.getAxisTicks(featureOrder, window.FEATURE_LABELS || {});
     const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
 
     const layout = buildDefaultPlotLayout({

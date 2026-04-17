@@ -1,17 +1,4 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // --- Utility function to generate a color scale dynamically ---
-    function generateColorScale(legend) {
-        const colors = window.DEFAULT_COLOR_PALETTE || [
-            '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
-            '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
-        ];
-        const colorMap = {};
-        legend.forEach((item, index) => {
-            colorMap[item] = colors[index % colors.length];
-        });
-        return colorMap;
-    }
-
     // --- Spinner utility ---
     const spinner = document.getElementById('spinner');
     function showSpinner() {
@@ -27,8 +14,19 @@ document.addEventListener('DOMContentLoaded', function() {
     let backendData = null;
     let activeTab = 'alterations';
 
-    // --- Utility: shared comparison metadata ---
-    function getComparisonConfig(comparisonType) {
+    const generateColorScale = window.generateColorScale || function(legend) {
+        const colors = window.DEFAULT_COLOR_PALETTE || [
+            '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
+            '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
+        ];
+        const colorMap = {};
+        (legend || []).forEach((item, index) => {
+            colorMap[item] = colors[index % colors.length];
+        });
+        return colorMap;
+    };
+
+    const getComparisonConfig = window.getComparisonConfig || function(comparisonType) {
         return (window.COMPARISON_CONFIG && window.COMPARISON_CONFIG[comparisonType]) || {
             column: null,
             label: comparisonType,
@@ -36,11 +34,135 @@ document.addEventListener('DOMContentLoaded', function() {
             order: null,
             colorMap: null
         };
-    }
+    };
 
-    function getComparisonLabel(comparisonType) {
+    const getComparisonLabel = window.getComparisonLabel || function(comparisonType) {
         return getComparisonConfig(comparisonType).label || comparisonType;
-    }
+    };
+
+    const getContextViewConfig = window.getContextViewConfig || function(view) {
+        return (window.CONTEXT_VIEW_CONFIG && window.CONTEXT_VIEW_CONFIG[view]) || {
+            label: 'Use Cases',
+            features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
+            responseScale: 'use_case_acceptability',
+            plotTitlePrefix: 'Use Case',
+            combineFeatures: true,
+            combinedPlotTitle: 'How acceptable would you find using AI-enhanced images in the following contexts?'
+        };
+    };
+
+    const getFeatureSortOrder = window.getFeatureSortOrder || function(sortBy, meltedHuman, meltedAI) {
+        function groupBy(arr, key) {
+            return (arr || []).reduce((acc, row) => {
+                const groupKey = row[key];
+                acc[groupKey] = acc[groupKey] || [];
+                acc[groupKey].push(row);
+                return acc;
+            }, {});
+        }
+
+        function getMean(rows) {
+            return rows.reduce((sum, row) => sum + (row.Numerical_Score ?? 0), 0) / rows.length;
+        }
+
+        function getMedian(rows) {
+            const nums = rows.map(row => row.Numerical_Score).sort((a, b) => a - b);
+            const mid = Math.floor(nums.length / 2);
+            return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+        }
+
+        if (sortBy === 'mean') {
+            const grouped = groupBy([...(meltedHuman || []), ...(meltedAI || [])], 'Feature_Name');
+            return Object.keys(grouped).sort((a, b) => getMean(grouped[b]) - getMean(grouped[a]));
+        }
+        if (sortBy === 'human_mean') {
+            const grouped = groupBy(meltedHuman, 'Feature_Name');
+            return Object.keys(grouped).sort((a, b) => getMean(grouped[b]) - getMean(grouped[a]));
+        }
+        if (sortBy === 'ai_mean') {
+            const grouped = groupBy(meltedAI, 'Feature_Name');
+            return Object.keys(grouped).sort((a, b) => getMean(grouped[b]) - getMean(grouped[a]));
+        }
+        if (sortBy === 'difference') {
+            const groupedH = groupBy(meltedHuman, 'Feature_Name');
+            const groupedA = groupBy(meltedAI, 'Feature_Name');
+            const allFeatures = Array.from(new Set([...Object.keys(groupedH), ...Object.keys(groupedA)]));
+            return allFeatures.sort((a, b) => {
+                const meanH_A = groupedH[a] ? getMean(groupedH[a]) : 0;
+                const meanA_A = groupedA[a] ? getMean(groupedA[a]) : 0;
+                const meanH_B = groupedH[b] ? getMean(groupedH[b]) : 0;
+                const meanA_B = groupedA[b] ? getMean(groupedA[b]) : 0;
+                return (meanH_B - meanA_B) - (meanH_A - meanA_A);
+            });
+        }
+        if (sortBy === 'median') {
+            const grouped = groupBy([...(meltedHuman || []), ...(meltedAI || [])], 'Feature_Name');
+            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
+        }
+        if (sortBy === 'human_median') {
+            const grouped = groupBy(meltedHuman, 'Feature_Name');
+            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
+        }
+        if (sortBy === 'ai_median') {
+            const grouped = groupBy(meltedAI, 'Feature_Name');
+            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
+        }
+        if (sortBy === 'difference_median') {
+            const groupedH = groupBy(meltedHuman, 'Feature_Name');
+            const groupedA = groupBy(meltedAI, 'Feature_Name');
+            const allFeatures = Array.from(new Set([...Object.keys(groupedH), ...Object.keys(groupedA)]));
+            return allFeatures.sort((a, b) => {
+                const medH_A = groupedH[a] ? getMedian(groupedH[a]) : 0;
+                const medA_A = groupedA[a] ? getMedian(groupedA[a]) : 0;
+                const medH_B = groupedH[b] ? getMedian(groupedH[b]) : 0;
+                const medA_B = groupedA[b] ? getMedian(groupedA[b]) : 0;
+                return (medH_B - medA_B) - (medH_A - medA_A);
+            });
+        }
+
+        return getFeatureSortOrder('mean', meltedHuman, meltedAI);
+    };
+
+    const getContextFeatureSortOrder = window.getContextFeatureSortOrder || function(sortBy, rows, fallbackFeatures) {
+        const features = Array.isArray(fallbackFeatures) ? fallbackFeatures.slice() : [];
+        if (!Array.isArray(rows) || rows.length === 0) {
+            return features;
+        }
+
+        const grouped = rows.reduce((acc, row) => {
+            const key = row.Feature_Name;
+            acc[key] = acc[key] || [];
+            acc[key].push(row.Numerical_Score);
+            return acc;
+        }, {});
+
+        function median(values) {
+            const sorted = values.slice().sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        }
+
+        const metric = (sortBy === 'median' || sortBy === 'human_median') ? 'median' : 'mean';
+        const ordered = Object.keys(grouped).sort((a, b) => {
+            const valuesA = grouped[a];
+            const valuesB = grouped[b];
+            const scoreA = metric === 'median'
+                ? median(valuesA)
+                : valuesA.reduce((sum, value) => sum + value, 0) / valuesA.length;
+            const scoreB = metric === 'median'
+                ? median(valuesB)
+                : valuesB.reduce((sum, value) => sum + value, 0) / valuesB.length;
+            return scoreB - scoreA;
+        });
+
+        features.forEach(feature => {
+            if (!ordered.includes(feature)) {
+                ordered.push(feature);
+            }
+        });
+
+        return ordered;
+    };
 
     // --- Utility: get current dropdown values ---
     function getSelections() {
@@ -49,17 +171,6 @@ document.addEventListener('DOMContentLoaded', function() {
             comparisonType: document.getElementById('comparison-type').value,
             sortBy: document.getElementById('sort-by').value,
             contextView: document.getElementById('context-view') ? document.getElementById('context-view').value : 'use_cases'
-        };
-    }
-
-    function getContextViewConfig(view) {
-        return (window.CONTEXT_VIEW_CONFIG && window.CONTEXT_VIEW_CONFIG[view]) || {
-            label: 'Use Cases',
-            features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
-            responseScale: 'use_case_acceptability',
-            plotTitlePrefix: 'Use Case',
-            combineFeatures: true,
-            combinedPlotTitle: 'How acceptable would you find using AI-enhanced images in the following contexts?'
         };
     }
 
@@ -154,115 +265,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         return true;
-    }
-
-    // --- Utility: sort features by mean, median, or difference ---
-    function getFeatureSortOrder(sortBy, meltedHuman, meltedAI) {
-        function groupBy(arr, key) {
-            return arr.reduce((acc, row) => {
-                const k = row[key];
-                acc[k] = acc[k] || [];
-                acc[k].push(row);
-                return acc;
-            }, {});
-        }
-        function getMean(rows) {
-            return rows.reduce((sum, row) => sum + (row.Numerical_Score ?? 0), 0) / rows.length;
-        }
-        function getMedian(rows) {
-            const nums = rows.map(row => row.Numerical_Score).sort((a, b) => a - b);
-            const mid = Math.floor(nums.length / 2);
-            return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
-        }
-
-        if (sortBy === 'mean') {
-            const grouped = groupBy([...(meltedHuman || []), ...(meltedAI || [])], 'Feature_Name');
-            return Object.keys(grouped).sort((a, b) => getMean(grouped[b]) - getMean(grouped[a]));
-        } else if (sortBy === 'human_mean') {
-            const grouped = groupBy(meltedHuman, 'Feature_Name');
-            return Object.keys(grouped).sort((a, b) => {
-                return getMean(grouped[b]) - getMean(grouped[a]);
-            });
-        } else if (sortBy === 'ai_mean') {
-            const grouped = groupBy(meltedAI, 'Feature_Name');
-            return Object.keys(grouped).sort((a, b) => {
-                return getMean(grouped[b]) - getMean(grouped[a]);
-            });
-        } else if (sortBy === 'difference') {
-            const groupedH = groupBy(meltedHuman, 'Feature_Name');
-            const groupedA = groupBy(meltedAI, 'Feature_Name');
-            const allFeatures = Array.from(new Set([...Object.keys(groupedH), ...Object.keys(groupedA)]));
-            return allFeatures.sort((a, b) => {
-                const meanH_A = groupedH[a] ? getMean(groupedH[a]) : 0;
-                const meanA_A = groupedA[a] ? getMean(groupedA[a]) : 0;
-                const meanH_B = groupedH[b] ? getMean(groupedH[b]) : 0;
-                const meanA_B = groupedA[b] ? getMean(groupedA[b]) : 0;
-                return (meanH_B - meanA_B) - (meanH_A - meanA_A);
-            });
-        } else if (sortBy === 'median') {
-            const grouped = groupBy([...(meltedHuman || []), ...(meltedAI || [])], 'Feature_Name');
-            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
-        } else if (sortBy === 'human_median') {
-            const grouped = groupBy(meltedHuman, 'Feature_Name');
-            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
-        } else if (sortBy === 'ai_median') {
-            const grouped = groupBy(meltedAI, 'Feature_Name');
-            return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
-        } else if (sortBy === 'difference_median') {
-            const groupedH = groupBy(meltedHuman, 'Feature_Name');
-            const groupedA = groupBy(meltedAI, 'Feature_Name');
-            const allFeatures = Array.from(new Set([...Object.keys(groupedH), ...Object.keys(groupedA)]));
-            return allFeatures.sort((a, b) => {
-                const medH_A = groupedH[a] ? getMedian(groupedH[a]) : 0;
-                const medA_A = groupedA[a] ? getMedian(groupedA[a]) : 0;
-                const medH_B = groupedH[b] ? getMedian(groupedH[b]) : 0;
-                const medA_B = groupedA[b] ? getMedian(groupedA[b]) : 0;
-                return (medH_B - medA_B) - (medH_A - medA_A);
-            });
-        }
-        // Default: overall mean
-        return getFeatureSortOrder('mean', meltedHuman, meltedAI);
-    }
-
-    function getContextFeatureSortOrder(sortBy, rows, fallbackFeatures) {
-        const features = Array.isArray(fallbackFeatures) ? fallbackFeatures.slice() : [];
-        if (!Array.isArray(rows) || rows.length === 0) {
-            return features;
-        }
-
-        const grouped = rows.reduce((acc, row) => {
-            const key = row.Feature_Name;
-            acc[key] = acc[key] || [];
-            acc[key].push(row.Numerical_Score);
-            return acc;
-        }, {});
-
-        function median(values) {
-            const sorted = values.slice().sort((a, b) => a - b);
-            const mid = Math.floor(sorted.length / 2);
-            return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-        }
-
-        const metric = (sortBy === 'median' || sortBy === 'human_median') ? 'median' : 'mean';
-        const ordered = Object.keys(grouped).sort((a, b) => {
-            const valuesA = grouped[a];
-            const valuesB = grouped[b];
-            const scoreA = metric === 'median'
-                ? median(valuesA)
-                : valuesA.reduce((sum, value) => sum + value, 0) / valuesA.length;
-            const scoreB = metric === 'median'
-                ? median(valuesB)
-                : valuesB.reduce((sum, value) => sum + value, 0) / valuesB.length;
-            return scoreB - scoreA;
-        });
-
-        features.forEach(feature => {
-            if (!ordered.includes(feature)) {
-                ordered.push(feature);
-            }
-        });
-
-        return ordered;
     }
 
     // --- Utility: get group display labels, colors, and order ---
@@ -385,31 +387,157 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Refactored rendering functions ---
-    function buildLegendLabels(rawGroups, labelMap, groupCounts) {
-        return rawGroups.map(rawGroup => {
-            const displayName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
-            const count = groupCounts && groupCounts[rawGroup] !== undefined ? groupCounts[rawGroup] : 0;
-            return `${displayName} (${count})`;
+    function buildValueRows(groups, features, getScores, buildRow) {
+        const rows = [];
+        groups.forEach(group => {
+            features.forEach(feature => {
+                const scores = getScores(group, feature) || [];
+                scores.forEach(score => {
+                    rows.push(buildRow({ group, feature, score }));
+                });
+            });
+        });
+        return rows;
+    }
+
+    function buildMetricRowsByGroups(groups, metricMap) {
+        return (groups || []).flatMap(group => (
+            Object.entries((metricMap && metricMap[group]) || {}).map(([Feature_Name, Numerical_Score]) => ({
+                Feature_Name,
+                Numerical_Score
+            }))
+        ));
+    }
+
+    function buildSummarySeriesPresentation(backendData, comparisonConfig) {
+        const groupName = backendData.groups[0] || 'Summary';
+        return {
+            groupName,
+            means: (backendData.meansHuman && backendData.meansHuman[groupName]) || {},
+            stds: (backendData.stdsHuman && backendData.stdsHuman[groupName]) || {},
+            traceName: `${groupName} (${backendData.groupCounts?.[groupName] || 0})`,
+            colorMap: { [groupName]: comparisonConfig.colorMap ? comparisonConfig.colorMap[groupName] : '#444' }
+        };
+    }
+
+    function buildGroupedMetricPresentation(comparisonType, backendData, sortBy) {
+        const groupPresentation = buildGroupPresentation(comparisonType, backendData);
+        const groupMeansHuman = {};
+        const groupMeansAI = {};
+        const groupStdsHuman = {};
+        const groupStdsAI = {};
+
+        backendData.groups.forEach(rawGroup => {
+            groupMeansHuman[rawGroup] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
+            groupMeansAI[rawGroup] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
+            groupStdsHuman[rawGroup] = backendData.stdsHuman ? (backendData.stdsHuman[rawGroup] || {}) : {};
+            groupStdsAI[rawGroup] = backendData.stdsAI ? (backendData.stdsAI[rawGroup] || {}) : {};
+        });
+
+        return Object.assign({}, groupPresentation, {
+            groupMeansHuman,
+            groupMeansAI,
+            groupStdsHuman,
+            groupStdsAI,
+            featureOrder: getFeatureSortOrder(
+                sortBy,
+                buildMetricRowsByGroups(backendData.groups, groupMeansHuman),
+                buildMetricRowsByGroups(backendData.groups, groupMeansAI)
+            ),
+            legendOrder: groupPresentation.groupOrder.map(group => groupPresentation.traceNameMap[group] || group)
         });
     }
 
-    function getFeatureOrderFromBackend(sortBy, meltedHuman, meltedAI) {
-        return getFeatureSortOrder(sortBy, meltedHuman, meltedAI);
+    function buildContextGroupPresentation(backendData, comparisonType) {
+        const comparisonConfig = getComparisonConfig(comparisonType);
+        const isSummary = comparisonType === 'summary';
+        const groupPresentation = isSummary
+            ? {
+                groupOrder: backendData.groups.slice(),
+                colorMap: { Summary: (comparisonConfig.colorMap && comparisonConfig.colorMap.Summary) || '#444' },
+                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` }
+            }
+            : buildGroupPresentation(comparisonType, backendData);
+
+        return {
+            isSummary,
+            groupPresentation,
+            legendOrder: groupPresentation.groupOrder.map(group => groupPresentation.traceNameMap[group] || group)
+        };
+    }
+
+    function renderContextPlotCollection({
+        backendData,
+        comparisonType,
+        sortBy,
+        contextView,
+        renderOptions = {},
+        buildRows,
+        renderCombinedPlot,
+        renderFeaturePlot
+    }) {
+        const viewConfig = getContextViewConfig(contextView);
+        const { container, plotIdPrefix } = getContextRenderTarget(renderOptions);
+        if (!container) return;
+
+        const rows = buildRows(backendData);
+        const featureOrder = getContextFeatureSortOrder(sortBy, rows, backendData.features);
+        const { isSummary, groupPresentation, legendOrder } = buildContextGroupPresentation(backendData, comparisonType);
+
+        if (viewConfig.combineFeatures === true) {
+            container.innerHTML = `
+                <div style="width:90vw;max-width:1200px;">
+                    <div id="${plotIdPrefix}-combined" class="context-plot" style="width:100%;"></div>
+                </div>
+            `;
+
+            renderCombinedPlot({
+                backendData,
+                featureOrder,
+                rows,
+                viewConfig,
+                groupPresentation,
+                legendOrder,
+                isSummary,
+                plotId: `${plotIdPrefix}-combined`
+            });
+            return;
+        }
+
+        container.innerHTML = featureOrder.map(feature => `
+            <div style="width:90vw;max-width:1200px;">
+                <div id="${plotIdPrefix}-${feature}" class="context-plot" style="width:100%;"></div>
+            </div>
+        `).join('');
+
+        featureOrder.forEach((feature, index) => {
+            renderFeaturePlot({
+                backendData,
+                feature,
+                featureRows: rows
+                    .filter(row => row.Feature_Name === feature)
+                    .map(row => Object.assign({}, row)),
+                featureIndex: index,
+                groupPresentation,
+                legendOrder,
+                isSummary,
+                plotId: `${plotIdPrefix}-${feature}`,
+                viewConfig
+            });
+        });
     }
 
     function renderBoxPlot(backendData, comparisonType, sortBy) {
         const comparisonConfig = getComparisonConfig(comparisonType);
 
         if (comparisonType === 'human_ai') {
-            const combined = [];
-            backendData.groups.forEach(group => {
-                backendData.features.forEach(feat => {
-                    (backendData.data[group][feat] || []).forEach(score => {
-                        combined.push({ Feature_Name: feat, Numerical_Score: score, Type: group });
-                    });
-                });
-            });
-            const featureOrder = getFeatureOrderFromBackend(
+            const combined = buildValueRows(
+                backendData.groups,
+                backendData.features,
+                (group, feature) => (backendData.data[group] && backendData.data[group][feature]) || [],
+                ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Type: group })
+            );
+            const featureOrder = getFeatureSortOrder(
                 sortBy,
                 combined.filter(r => r.Type === 'Human'),
                 combined.filter(r => r.Type === 'AI')
@@ -432,14 +560,14 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('ai-plot').style.display = 'none';
             return;
         } else if (comparisonType === 'summary') {
-            const combined = [];
             const groupName = backendData.groups[0] || 'Summary';
-            backendData.features.forEach(feat => {
-                (backendData.data[groupName] && backendData.data[groupName][feat] || []).forEach(score => {
-                    combined.push({ Feature_Name: feat, Numerical_Score: score, Type: groupName });
-                });
-            });
-            const featureOrder = getFeatureOrderFromBackend(sortBy, combined, combined);
+            const combined = buildValueRows(
+                [groupName],
+                backendData.features,
+                (group, feature) => ((backendData.data[group] && backendData.data[group][feature]) || []),
+                ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Type: group })
+            );
+            const featureOrder = getFeatureSortOrder(sortBy, combined, combined);
             makeBoxPlot(
                 combined,
                 'Feature_Name',
@@ -460,24 +588,24 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const { groupOrder, groupKey, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
-        let meltedHuman = [];
-        let meltedAI = [];
-
-        backendData.groups.forEach(group => {
-            backendData.features.forEach(feat => {
-                const humanScores = (backendData.data[group] && backendData.data[group][feat]) ? backendData.data[group][feat] : [];
-                const aiScores = (backendData.data[`${group}__AI`] && backendData.data[`${group}__AI`][feat]) ? backendData.data[`${group}__AI`][feat] : [];
-
-                humanScores.forEach(score => meltedHuman.push({ Feature_Name: feat, Numerical_Score: score, Group: group }));
-                aiScores.forEach(score => meltedAI.push({ Feature_Name: feat, Numerical_Score: score, Group: group }));
-            });
-        });
+        const { groupOrder, groupKey, colorMap, traceNameMap } = buildGroupPresentation(comparisonType, backendData);
+        let meltedHuman = buildValueRows(
+            backendData.groups,
+            backendData.features,
+            (group, feature) => ((backendData.data[group] && backendData.data[group][feature]) || []),
+            ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Group: group })
+        );
+        let meltedAI = buildValueRows(
+            backendData.groups,
+            backendData.features,
+            (group, feature) => ((backendData.data[`${group}__AI`] && backendData.data[`${group}__AI`][feature]) || []),
+            ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Group: group })
+        );
 
         if (!backendData.humanGroups) meltedHuman = meltedHuman.concat(meltedAI);
         if (!backendData.aiGroups) meltedAI = meltedAI.concat(meltedHuman);
 
-        const featureOrder = getFeatureOrderFromBackend(sortBy, meltedHuman, meltedAI);
+        const featureOrder = getFeatureSortOrder(sortBy, meltedHuman, meltedAI);
         const boxPlotLegendOrder = groupOrder.map(g => traceNameMap[g]);
 
         makeBoxPlot(
@@ -522,7 +650,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (comparisonType === 'human_ai') {
             const humanMeans = backendData.meansHuman['Human'] || {};
             const aiMeans = backendData.meansAI['AI'] || {};
-            const featureOrder = getFeatureOrderFromBackend(
+            const featureOrder = getFeatureSortOrder(
                 sortBy,
                 Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
                 Object.entries(aiMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
@@ -546,26 +674,23 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('ai-plot').style.display = 'none';
             return;
         } else if (comparisonType === 'summary') {
-            const groupName = backendData.groups[0] || 'Summary';
-            const combinedMeans = backendData.meansHuman[groupName] || {};
-            const combinedStds = backendData.stdsHuman[groupName] || {};
-            const traceName = `${groupName} (${backendData.groupCounts?.[groupName] || 0})`;
-            const featureOrder = getFeatureOrderFromBackend(
+            const summary = buildSummarySeriesPresentation(backendData, comparisonConfig);
+            const featureOrder = getFeatureSortOrder(
                 sortBy,
-                Object.entries(combinedMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
-                Object.entries(combinedMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
+                buildMetricRowsByGroups([summary.groupName], { [summary.groupName]: summary.means }),
+                buildMetricRowsByGroups([summary.groupName], { [summary.groupName]: summary.means })
             );
             makeLineChart(
-                { [groupName]: combinedMeans },
+                { [summary.groupName]: summary.means },
                 featureOrder,
-                { [groupName]: comparisonConfig.colorMap ? comparisonConfig.colorMap[groupName] : '#444' },
-                [traceName],
+                summary.colorMap,
+                [summary.traceName],
                 {
                     title: 'Overall Mean Acceptability Summary',
                     legendTitle: 'Summary',
-                    traceNameMap: { [groupName]: traceName },
-                    groupOrder: [groupName],
-                    stdDevDict: { [groupName]: combinedStds },
+                    traceNameMap: { [summary.groupName]: summary.traceName },
+                    groupOrder: [summary.groupName],
+                    stdDevDict: { [summary.groupName]: summary.stds },
                     showLegend: false
                 },
                 'human-plot'
@@ -575,33 +700,22 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const { groupOrder, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
-        const legendWithCounts = buildLegendLabels(backendData.groups, labelMap, backendData.groupCounts);
-
-        const groupMeansHuman = {};
-        const groupMeansAI = {};
-        const groupStdsHuman = {};
-        const groupStdsAI = {};
-
-        backendData.groups.forEach(rawGroup => {
-            groupMeansHuman[rawGroup] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
-            groupMeansAI[rawGroup] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
-            groupStdsHuman[rawGroup] = backendData.stdsHuman ? (backendData.stdsHuman[rawGroup] || {}) : {};
-            groupStdsAI[rawGroup] = backendData.stdsAI ? (backendData.stdsAI[rawGroup] || {}) : {};
-        });
-
-        const featureOrder = getFeatureOrderFromBackend(
-            sortBy,
-            Object.entries(groupMeansHuman).flatMap(([feature, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v }))),
-            Object.entries(groupMeansAI).flatMap(([feature, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v })))
-        );
+        const {
+            groupOrder,
+            colorMap,
+            traceNameMap,
+            groupMeansHuman,
+            groupMeansAI,
+            featureOrder,
+            legendOrder
+        } = buildGroupedMetricPresentation(comparisonType, backendData, sortBy);
 
         makeSlopeChart(
             groupMeansHuman,
             groupMeansAI,
             featureOrder,
             colorMap,
-            legendWithCounts,
+            legendOrder,
             {
                 title: 'Mean Acceptability (Human \u25cf vs AI \u25cb)',
                 legendTitle: 'Group',
@@ -623,7 +737,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const aiMeans = backendData.means['AI'] || {};
             const humanStds = backendData.stdsHuman['Human'] || {};
             const aiStds = backendData.stdsAI['AI'] || {};
-            const featureOrder = getFeatureOrderFromBackend(
+            const featureOrder = getFeatureSortOrder(
                 sortBy,
                 Object.entries(humanMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
                 Object.entries(aiMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
@@ -647,26 +761,23 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('ai-plot').style.display = 'none';
             return;
         } else if (comparisonType === 'summary') {
-            const groupName = backendData.groups[0] || 'Summary';
-            const combinedMeans = backendData.meansHuman[groupName] || {};
-            const combinedStds = backendData.stdsHuman[groupName] || {};
-            const traceName = `${groupName} (${backendData.groupCounts?.[groupName] || 0})`;
-            const featureOrder = getFeatureOrderFromBackend(
+            const summary = buildSummarySeriesPresentation(backendData, comparisonConfig);
+            const featureOrder = getFeatureSortOrder(
                 sortBy,
-                Object.entries(combinedMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
-                Object.entries(combinedMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
+                buildMetricRowsByGroups([summary.groupName], { [summary.groupName]: summary.means }),
+                buildMetricRowsByGroups([summary.groupName], { [summary.groupName]: summary.means })
             );
             makeLineChart(
-                { [groupName]: combinedMeans },
+                { [summary.groupName]: summary.means },
                 featureOrder,
-                { [groupName]: comparisonConfig.colorMap ? comparisonConfig.colorMap[groupName] : '#444' },
-                [traceName],
+                summary.colorMap,
+                [summary.traceName],
                 {
                     title: 'Overall Mean Acceptability Summary',
                     legendTitle: 'Summary',
-                    traceNameMap: { [groupName]: traceName },
-                    groupOrder: [groupName],
-                    stdDevDict: { [groupName]: combinedStds },
+                    traceNameMap: { [summary.groupName]: summary.traceName },
+                    groupOrder: [summary.groupName],
+                    stdDevDict: { [summary.groupName]: summary.stds },
                     showLegend: false
                 },
                 'human-plot'
@@ -676,32 +787,23 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const { groupOrder, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
-        const legendWithCounts = buildLegendLabels(backendData.groups, labelMap, backendData.groupCounts);
-
-        const groupMeansHuman = {};
-        const groupMeansAI = {};
-        const groupStdsHuman = {};
-        const groupStdsAI = {};
-
-        backendData.groups.forEach(rawGroup => {
-            groupMeansHuman[rawGroup] = backendData.meansHuman ? (backendData.meansHuman[rawGroup] || {}) : {};
-            groupMeansAI[rawGroup] = backendData.meansAI ? (backendData.meansAI[rawGroup] || {}) : {};
-            groupStdsHuman[rawGroup] = backendData.stdsHuman ? (backendData.stdsHuman[rawGroup] || {}) : {};
-            groupStdsAI[rawGroup] = backendData.stdsAI ? (backendData.stdsAI[rawGroup] || {}) : {};
-        });
-
-        const featureOrder = getFeatureOrderFromBackend(
-            sortBy,
-            Object.entries(groupMeansHuman).flatMap(([feature, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v }))),
-            Object.entries(groupMeansAI).flatMap(([feature, obj]) => Object.entries(obj).map(([f, v]) => ({ Feature_Name: f, Numerical_Score: v })))
-        );
+        const {
+            groupOrder,
+            colorMap,
+            traceNameMap,
+            groupMeansHuman,
+            groupMeansAI,
+            groupStdsHuman,
+            groupStdsAI,
+            featureOrder,
+            legendOrder
+        } = buildGroupedMetricPresentation(comparisonType, backendData, sortBy);
 
         makeLineChart(
             groupMeansHuman,
             featureOrder,
             colorMap,
-            legendWithCounts,
+            legendOrder,
             {
                 title: 'Mean Acceptability for Human Alteration (\u00b11 Stdev Bands)',
                 legendTitle: 'Group',
@@ -716,7 +818,7 @@ document.addEventListener('DOMContentLoaded', function() {
             groupMeansAI,
             featureOrder,
             colorMap,
-            legendWithCounts,
+            legendOrder,
             {
                 title: 'Mean Acceptability for AI Alteration (\u00b11 Stdev Bands)',
                 legendTitle: 'Group',
@@ -736,15 +838,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const comparisonConfig = getComparisonConfig(comparisonType);
 
         if (comparisonType === 'human_ai') {
-            const combined = [];
-            backendData.groups.forEach(group => {
-                backendData.features.forEach(feat => {
-                    (backendData.data[feat][group] || []).forEach(score => {
-                        combined.push({ Feature_Name: feat, Numerical_Score: score, Type: group });
-                    });
-                });
-            });
-            const featureOrder = getFeatureOrderFromBackend(
+            const combined = buildValueRows(
+                backendData.groups,
+                backendData.features,
+                (group, feature) => ((backendData.data[feature] && backendData.data[feature][group]) || []),
+                ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Type: group })
+            );
+            const featureOrder = getFeatureSortOrder(
                 sortBy,
                 combined.filter(r => r.Type === 'Human'),
                 combined.filter(r => r.Type === 'AI')
@@ -769,13 +869,13 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         } else if (comparisonType === 'summary') {
             const groupName = backendData.groups[0] || 'Summary';
-            const combined = [];
-            backendData.features.forEach(feat => {
-                (backendData.data[feat][groupName] || []).forEach(score => {
-                    combined.push({ Feature_Name: feat, Numerical_Score: score, Type: groupName });
-                });
-            });
-            const featureOrder = getFeatureOrderFromBackend(sortBy, combined, combined);
+            const combined = buildValueRows(
+                [groupName],
+                backendData.features,
+                (group, feature) => ((backendData.data[feature] && backendData.data[feature][group]) || []),
+                ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Type: group })
+            );
+            const featureOrder = getFeatureSortOrder(sortBy, combined, combined);
             makeSwarmPlot(
                 combined,
                 'Feature_Name',
@@ -797,22 +897,21 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const { groupOrder, groupKey, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
-        const combinedHuman = [];
-        const combinedAI = [];
+        const { rawGroups, groupOrder, groupKey, colorMap, traceNameMap } = buildGroupPresentation(comparisonType, backendData);
+        const combinedHuman = buildValueRows(
+            rawGroups,
+            backendData.features,
+            (group, feature) => ((backendData.dataHuman[feature] && backendData.dataHuman[feature][group]) || []),
+            ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Group: group })
+        );
+        const combinedAI = buildValueRows(
+            rawGroups,
+            backendData.features,
+            (group, feature) => ((backendData.dataAI[feature] && backendData.dataAI[feature][group]) || []),
+            ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Group: group })
+        );
 
-        backendData.groups.forEach(rawGroup => {
-            if (rawGroup === undefined || rawGroup === null || String(rawGroup).trim().toLowerCase() === 'nan' || String(rawGroup).trim() === '') return;
-            const shortName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
-            backendData.features.forEach(feat => {
-                const valuesH = (backendData.dataHuman[feat] && backendData.dataHuman[feat][rawGroup]) ? backendData.dataHuman[feat][rawGroup] : [];
-                valuesH.forEach(score => combinedHuman.push({ Feature_Name: feat, Numerical_Score: score, Group: rawGroup, ShortGroup: shortName }));
-                const valuesA = (backendData.dataAI[feat] && backendData.dataAI[feat][rawGroup]) ? backendData.dataAI[feat][rawGroup] : [];
-                valuesA.forEach(score => combinedAI.push({ Feature_Name: feat, Numerical_Score: score, Group: rawGroup, ShortGroup: shortName }));
-            });
-        });
-
-        const featureOrder = getFeatureOrderFromBackend(sortBy, combinedHuman, combinedAI);
+        const featureOrder = getFeatureSortOrder(sortBy, combinedHuman, combinedAI);
         makeSwarmPlot(
             combinedHuman,
             'Feature_Name',
@@ -848,20 +947,29 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function buildContextRows(backendData) {
-        const rows = [];
-        backendData.features.forEach(feature => {
-            backendData.groups.forEach(group => {
-                const scores = (backendData.data[feature] && backendData.data[feature][group]) ? backendData.data[feature][group] : [];
-                scores.forEach(score => {
-                    rows.push({
-                        Feature_Name: feature,
-                        Numerical_Score: score,
-                        Group: group
-                    });
-                });
-            });
-        });
-        return rows;
+        return buildValueRows(
+            backendData.groups,
+            backendData.features,
+            (group, feature) => ((backendData.data[feature] && backendData.data[feature][group]) || []),
+            ({ group, feature, score }) => ({
+                Feature_Name: feature,
+                Numerical_Score: score,
+                Group: group
+            })
+        );
+    }
+
+    function buildContextMeanRows(backendData) {
+        return backendData.features.flatMap(feature => (
+            backendData.groups.flatMap(group => {
+                const score = backendData.means[group] ? backendData.means[group][feature] : null;
+                return score === null || score === undefined ? [] : [{
+                    Feature_Name: feature,
+                    Numerical_Score: score,
+                    Group: group
+                }];
+            })
+        ));
     }
 
     function renderContextError(message) {
@@ -876,11 +984,6 @@ document.addEventListener('DOMContentLoaded', function() {
             return feature;
         }
         return `${feature}: ${featureLabel}`;
-    }
-
-    function shouldCombineContextFeatures(contextView) {
-        const viewConfig = getContextViewConfig(contextView);
-        return viewConfig.combineFeatures === true;
     }
 
     function getContextViewsToRender(contextView) {
@@ -904,261 +1007,175 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderContextBoxPlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
-        const viewConfig = getContextViewConfig(contextView);
-        const comparisonConfig = getComparisonConfig(comparisonType);
-        const { container, plotIdPrefix } = getContextRenderTarget(renderOptions);
-        if (!container) return;
-
-        const rows = buildContextRows(backendData);
-        const featureOrder = getContextFeatureSortOrder(sortBy, rows, backendData.features);
-        const isSummary = comparisonType === 'summary';
-        const groupPresentation = isSummary
-            ? {
-                groupOrder: backendData.groups.slice(),
-                colorMap: { Summary: (comparisonConfig.colorMap && comparisonConfig.colorMap.Summary) || '#444' },
-                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` }
+        renderContextPlotCollection({
+            backendData,
+            comparisonType,
+            sortBy,
+            contextView,
+            renderOptions,
+            buildRows: buildContextRows,
+            renderCombinedPlot: ({ rows, featureOrder, viewConfig, groupPresentation, legendOrder, isSummary, plotId }) => {
+                makeBoxPlot(
+                    rows,
+                    'Feature_Name',
+                    'Numerical_Score',
+                    'Group',
+                    {
+                        title: getCombinedContextPlotTitle(viewConfig),
+                        colorMap: groupPresentation.colorMap,
+                        categoryOrders: { Feature_Name: featureOrder, Group: groupPresentation.groupOrder },
+                        xaxisTitle: '',
+                        yaxisTitle: '',
+                        xTickAngle: 15,
+                        responseScale: viewConfig.responseScale,
+                        legendOrder,
+                        traceNameMap: groupPresentation.traceNameMap,
+                        showLegend: !isSummary
+                    },
+                    plotId
+                );
+            },
+            renderFeaturePlot: ({ feature, featureRows, featureIndex, viewConfig, groupPresentation, legendOrder, isSummary, plotId }) => {
+                makeBoxPlot(
+                    featureRows,
+                    'Feature_Name',
+                    'Numerical_Score',
+                    'Group',
+                    {
+                        title: getContextPlotTitle(feature, viewConfig),
+                        colorMap: groupPresentation.colorMap,
+                        categoryOrders: { Feature_Name: [feature], Group: groupPresentation.groupOrder },
+                        xaxisTitle: '',
+                        yaxisTitle: '',
+                        xTickAngle: 15,
+                        responseScale: viewConfig.responseScale,
+                        legendOrder,
+                        traceNameMap: groupPresentation.traceNameMap,
+                        showLegend: !isSummary && featureIndex === 0
+                    },
+                    plotId
+                );
             }
-            : buildGroupPresentation(comparisonType, backendData);
-        const legendOrder = groupPresentation.groupOrder.map(group => groupPresentation.traceNameMap[group] || group);
-
-        if (shouldCombineContextFeatures(contextView)) {
-            container.innerHTML = `
-                <div style="width:90vw;max-width:1200px;">
-                    <div id="${plotIdPrefix}-combined" class="context-plot" style="width:100%;"></div>
-                </div>
-            `;
-
-            makeBoxPlot(
-                rows,
-                'Feature_Name',
-                'Numerical_Score',
-                'Group',
-                {
-                    title: getCombinedContextPlotTitle(viewConfig),
-                    colorMap: groupPresentation.colorMap,
-                    categoryOrders: { Feature_Name: featureOrder, Group: groupPresentation.groupOrder },
-                    xaxisTitle: '',
-                    yaxisTitle: '',
-                    xTickAngle: 15,
-                    responseScale: viewConfig.responseScale,
-                    legendOrder,
-                    traceNameMap: groupPresentation.traceNameMap,
-                    showLegend: !isSummary
-                },
-                `${plotIdPrefix}-combined`
-            );
-            return;
-        }
-
-        container.innerHTML = featureOrder.map(feature => `
-            <div style="width:90vw;max-width:1200px;">
-                <div id="${plotIdPrefix}-${feature}" class="context-plot" style="width:100%;"></div>
-            </div>
-        `).join('');
-
-        featureOrder.forEach((feature, index) => {
-            const featureRows = rows
-                .filter(row => row.Feature_Name === feature)
-                .map(row => Object.assign({}, row));
-            makeBoxPlot(
-                featureRows,
-                'Feature_Name',
-                'Numerical_Score',
-                'Group',
-                {
-                    title: getContextPlotTitle(feature, viewConfig),
-                    colorMap: groupPresentation.colorMap,
-                    categoryOrders: { Feature_Name: [feature], Group: groupPresentation.groupOrder },
-                    xaxisTitle: '',
-                    yaxisTitle: '',
-                    xTickAngle: 15,
-                    responseScale: viewConfig.responseScale,
-                    legendOrder,
-                    traceNameMap: groupPresentation.traceNameMap,
-                    showLegend: !isSummary && index === 0
-                },
-                `${plotIdPrefix}-${feature}`
-            );
         });
     }
 
     function renderContextLinePlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
-        const viewConfig = getContextViewConfig(contextView);
-        const comparisonConfig = getComparisonConfig(comparisonType);
-        const { container, plotIdPrefix } = getContextRenderTarget(renderOptions);
-        if (!container) return;
+        renderContextPlotCollection({
+            backendData,
+            comparisonType,
+            sortBy,
+            contextView,
+            renderOptions,
+            buildRows: buildContextMeanRows,
+            renderCombinedPlot: ({ backendData: contextData, featureOrder, viewConfig, groupPresentation, legendOrder, isSummary, plotId }) => {
+                const means = {};
+                const stds = {};
+                groupPresentation.groupOrder.forEach(group => {
+                    means[group] = contextData.means[group] || {};
+                    stds[group] = contextData.stds[group] || {};
+                });
 
-        const rows = backendData.features.flatMap(feature => (
-            backendData.groups.flatMap(group => {
-                const score = backendData.means[group] ? backendData.means[group][feature] : null;
-                return score === null || score === undefined ? [] : [{
-                    Feature_Name: feature,
-                    Numerical_Score: score,
-                    Group: group
-                }];
-            })
-        ));
-        const featureOrder = getContextFeatureSortOrder(sortBy, rows, backendData.features);
-        const isSummary = comparisonType === 'summary';
-        const groupPresentation = isSummary
-            ? {
-                groupOrder: backendData.groups.slice(),
-                colorMap: { Summary: (comparisonConfig.colorMap && comparisonConfig.colorMap.Summary) || '#444' },
-                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` }
+                makeLineChart(
+                    means,
+                    featureOrder,
+                    groupPresentation.colorMap,
+                    legendOrder,
+                    {
+                        title: getCombinedContextPlotTitle(viewConfig),
+                        legendTitle: isSummary ? 'Summary' : 'Group',
+                        traceNameMap: groupPresentation.traceNameMap,
+                        groupOrder: groupPresentation.groupOrder,
+                        stdDevDict: stds,
+                        xaxisTitle: '',
+                        yaxisTitle: '',
+                        xTickAngle: 15,
+                        responseScale: viewConfig.responseScale,
+                        showLegend: !isSummary
+                    },
+                    plotId
+                );
+            },
+            renderFeaturePlot: ({ backendData: contextData, feature, featureIndex, viewConfig, groupPresentation, legendOrder, isSummary, plotId }) => {
+                const means = {};
+                const stds = {};
+                groupPresentation.groupOrder.forEach(group => {
+                    means[group] = { [feature]: contextData.means[group] ? contextData.means[group][feature] : null };
+                    stds[group] = { [feature]: contextData.stds[group] ? contextData.stds[group][feature] : null };
+                });
+
+                makeLineChart(
+                    means,
+                    [feature],
+                    groupPresentation.colorMap,
+                    legendOrder,
+                    {
+                        title: getContextPlotTitle(feature, viewConfig),
+                        legendTitle: isSummary ? 'Summary' : 'Group',
+                        traceNameMap: groupPresentation.traceNameMap,
+                        groupOrder: groupPresentation.groupOrder,
+                        stdDevDict: stds,
+                        xaxisTitle: '',
+                        yaxisTitle: '',
+                        xTickAngle: 15,
+                        responseScale: viewConfig.responseScale,
+                        showLegend: !isSummary && featureIndex === 0
+                    },
+                    plotId
+                );
             }
-            : buildGroupPresentation(comparisonType, backendData);
-        const legendOrder = groupPresentation.groupOrder.map(group => groupPresentation.traceNameMap[group] || group);
-
-        if (shouldCombineContextFeatures(contextView)) {
-            container.innerHTML = `
-                <div style="width:90vw;max-width:1200px;">
-                    <div id="${plotIdPrefix}-combined" class="context-plot" style="width:100%;"></div>
-                </div>
-            `;
-
-            const means = {};
-            const stds = {};
-            groupPresentation.groupOrder.forEach(group => {
-                means[group] = backendData.means[group] || {};
-                stds[group] = backendData.stds[group] || {};
-            });
-
-            makeLineChart(
-                means,
-                featureOrder,
-                groupPresentation.colorMap,
-                legendOrder,
-                {
-                    title: getCombinedContextPlotTitle(viewConfig),
-                    legendTitle: isSummary ? 'Summary' : 'Group',
-                    traceNameMap: groupPresentation.traceNameMap,
-                    groupOrder: groupPresentation.groupOrder,
-                    stdDevDict: stds,
-                    xaxisTitle: '',
-                    yaxisTitle: '',
-                    xTickAngle: 15,
-                    responseScale: viewConfig.responseScale,
-                    showLegend: !isSummary
-                },
-                `${plotIdPrefix}-combined`
-            );
-            return;
-        }
-
-        container.innerHTML = featureOrder.map(feature => `
-            <div style="width:90vw;max-width:1200px;">
-                <div id="${plotIdPrefix}-${feature}" class="context-plot" style="width:100%;"></div>
-            </div>
-        `).join('');
-
-        featureOrder.forEach((feature, index) => {
-            const means = {};
-            const stds = {};
-            groupPresentation.groupOrder.forEach(group => {
-                means[group] = {};
-                means[group][feature] = backendData.means[group] ? backendData.means[group][feature] : null;
-                stds[group] = {};
-                stds[group][feature] = backendData.stds[group] ? backendData.stds[group][feature] : null;
-            });
-
-            makeLineChart(
-                means,
-                [feature],
-                groupPresentation.colorMap,
-                legendOrder,
-                {
-                    title: getContextPlotTitle(feature, viewConfig),
-                    legendTitle: isSummary ? 'Summary' : 'Group',
-                    traceNameMap: groupPresentation.traceNameMap,
-                    groupOrder: groupPresentation.groupOrder,
-                    stdDevDict: stds,
-                    xaxisTitle: '',
-                    yaxisTitle: '',
-                    xTickAngle: 15,
-                    responseScale: viewConfig.responseScale,
-                    showLegend: !isSummary && index === 0
-                },
-                `${plotIdPrefix}-${feature}`
-            );
         });
     }
 
     function renderContextSwarmPlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
-        const viewConfig = getContextViewConfig(contextView);
-        const comparisonConfig = getComparisonConfig(comparisonType);
-        const { container, plotIdPrefix } = getContextRenderTarget(renderOptions);
-        if (!container) return;
-
-        const rows = buildContextRows(backendData);
-        const featureOrder = getContextFeatureSortOrder(sortBy, rows, backendData.features);
-        const isSummary = comparisonType === 'summary';
-        const groupPresentation = isSummary
-            ? {
-                groupOrder: backendData.groups.slice(),
-                colorMap: { Summary: (comparisonConfig.colorMap && comparisonConfig.colorMap.Summary) || '#444' },
-                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` }
+        renderContextPlotCollection({
+            backendData,
+            comparisonType,
+            sortBy,
+            contextView,
+            renderOptions,
+            buildRows: buildContextRows,
+            renderCombinedPlot: ({ rows, featureOrder, viewConfig, groupPresentation, legendOrder, isSummary, plotId }) => {
+                makeSwarmPlot(
+                    rows,
+                    'Feature_Name',
+                    'Numerical_Score',
+                    'Group',
+                    {
+                        title: getCombinedContextPlotTitle(viewConfig),
+                        colorMap: groupPresentation.colorMap,
+                        categoryOrders: { Feature_Name: featureOrder, Group: groupPresentation.groupOrder },
+                        xaxisTitle: '',
+                        yaxisTitle: '',
+                        xTickAngle: 15,
+                        responseScale: viewConfig.responseScale,
+                        traceNameMap: groupPresentation.traceNameMap,
+                        legendOrder,
+                        showLegend: !isSummary
+                    },
+                    plotId
+                );
+            },
+            renderFeaturePlot: ({ feature, featureRows, featureIndex, viewConfig, groupPresentation, legendOrder, isSummary, plotId }) => {
+                makeSwarmPlot(
+                    featureRows,
+                    'Feature_Name',
+                    'Numerical_Score',
+                    'Group',
+                    {
+                        title: getContextPlotTitle(feature, viewConfig),
+                        colorMap: groupPresentation.colorMap,
+                        categoryOrders: { Feature_Name: [feature], Group: groupPresentation.groupOrder },
+                        xaxisTitle: '',
+                        yaxisTitle: '',
+                        xTickAngle: 15,
+                        responseScale: viewConfig.responseScale,
+                        traceNameMap: groupPresentation.traceNameMap,
+                        legendOrder,
+                        showLegend: !isSummary && featureIndex === 0
+                    },
+                    plotId
+                );
             }
-            : buildGroupPresentation(comparisonType, backendData);
-        const legendOrder = groupPresentation.groupOrder.map(group => groupPresentation.traceNameMap[group] || group);
-
-        if (shouldCombineContextFeatures(contextView)) {
-            container.innerHTML = `
-                <div style="width:90vw;max-width:1200px;">
-                    <div id="${plotIdPrefix}-combined" class="context-plot" style="width:100%;"></div>
-                </div>
-            `;
-
-            makeSwarmPlot(
-                rows,
-                'Feature_Name',
-                'Numerical_Score',
-                'Group',
-                {
-                    title: getCombinedContextPlotTitle(viewConfig),
-                    colorMap: groupPresentation.colorMap,
-                    categoryOrders: { Feature_Name: featureOrder, Group: groupPresentation.groupOrder },
-                    xaxisTitle: '',
-                    yaxisTitle: '',
-                    xTickAngle: 15,
-                    responseScale: viewConfig.responseScale,
-                    traceNameMap: groupPresentation.traceNameMap,
-                    legendOrder,
-                    showLegend: !isSummary
-                },
-                `${plotIdPrefix}-combined`
-            );
-            return;
-        }
-
-        container.innerHTML = featureOrder.map(feature => `
-            <div style="width:90vw;max-width:1200px;">
-                <div id="${plotIdPrefix}-${feature}" class="context-plot" style="width:100%;"></div>
-            </div>
-        `).join('');
-
-        featureOrder.forEach((feature, index) => {
-            const featureRows = rows
-                .filter(row => row.Feature_Name === feature)
-                .map(row => Object.assign({}, row));
-            makeSwarmPlot(
-                featureRows,
-                'Feature_Name',
-                'Numerical_Score',
-                'Group',
-                {
-                    title: getContextPlotTitle(feature, viewConfig),
-                    colorMap: groupPresentation.colorMap,
-                    categoryOrders: { Feature_Name: [feature], Group: groupPresentation.groupOrder },
-                    xaxisTitle: '',
-                    yaxisTitle: '',
-                    xTickAngle: 15,
-                    responseScale: viewConfig.responseScale,
-                    traceNameMap: groupPresentation.traceNameMap,
-                    legendOrder,
-                    showLegend: !isSummary && index === 0
-                },
-                `${plotIdPrefix}-${feature}`
-            );
         });
     }
 
@@ -1208,19 +1225,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 plotIdPrefix: `context-plot-${view}`
             });
         });
-    }
-
-    const TAB_RENDERERS = {
-        alterations: renderAlterationsTab,
-        contexts: renderContextsTab
-    };
-
-    function renderAlterationsTab() {
-        updatePlots();
-    }
-
-    function renderContextsTab() {
-        updatePlots();
     }
 
     function updateControlAvailability(tabName = activeTab) {
@@ -1308,13 +1312,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (selectedSortOption && selectedSortOption.disabled) {
             sortBySelect.value = 'mean';
         }
-    }
-
-    function loadTabData(tabName) {
-        if (tabName === 'alterations' || tabName === 'contexts') {
-            return refreshBackendData();
-        }
-        return Promise.resolve();
     }
 
     // --- Main plot update logic ---
@@ -1448,23 +1445,10 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         activeTab = tabName;
         updateControlAvailability(tabName);
-        loadTabData(tabName)
-            .then(() => {
-                const renderer = TAB_RENDERERS[tabName];
-                if (typeof renderer === 'function') {
-                    renderer();
-                }
-            })
+        refreshBackendData()
             .catch(err => {
                 console.error(`Error loading data for tab ${tabName}:`, err);
             });
-    }
-
-    function renderActiveTab() {
-        const renderer = TAB_RENDERERS[activeTab];
-        if (typeof renderer === 'function') {
-            renderer();
-        }
     }
 
 });

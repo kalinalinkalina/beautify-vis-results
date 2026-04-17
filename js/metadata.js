@@ -204,6 +204,39 @@ const CONTEXT_VIEW_CONFIG = {
     }
 };
 
+function generateColorScale(legend) {
+    const colorMap = {};
+    (legend || []).forEach((item, index) => {
+        colorMap[item] = DEFAULT_COLOR_PALETTE[index % DEFAULT_COLOR_PALETTE.length];
+    });
+    return colorMap;
+}
+
+function getComparisonConfig(comparisonType) {
+    return COMPARISON_CONFIG[comparisonType] || {
+        column: null,
+        label: comparisonType,
+        labelMap: null,
+        order: null,
+        colorMap: null
+    };
+}
+
+function getComparisonLabel(comparisonType) {
+    return getComparisonConfig(comparisonType).label || comparisonType;
+}
+
+function getContextViewConfig(view) {
+    return CONTEXT_VIEW_CONFIG[view] || {
+        label: 'Use Cases',
+        features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
+        responseScale: 'use_case_acceptability',
+        plotTitlePrefix: 'Use Case',
+        combineFeatures: true,
+        combinedPlotTitle: 'How acceptable would you find using AI-enhanced images in the following contexts?'
+    };
+}
+
 if (typeof window !== 'undefined') {
     window.DEFAULT_COLOR_PALETTE = DEFAULT_COLOR_PALETTE;
     window.PLOTLY_QUALITATIVE_COLORS = PLOTLY_QUALITATIVE_COLORS;
@@ -211,4 +244,8 @@ if (typeof window !== 'undefined') {
     window.FEATURE_LABELS = FEATURE_LABELS;
     window.RESPONSE_SCALES = RESPONSE_SCALES;
     window.CONTEXT_VIEW_CONFIG = CONTEXT_VIEW_CONFIG;
+    window.generateColorScale = generateColorScale;
+    window.getComparisonConfig = getComparisonConfig;
+    window.getComparisonLabel = getComparisonLabel;
+    window.getContextViewConfig = getContextViewConfig;
 }

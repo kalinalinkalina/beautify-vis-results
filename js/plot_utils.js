@@ -50,6 +50,119 @@ function getLikertYAxisTicks(scaleKey = 'acceptability') {
     };
 }
 
+function getFeatureSortOrder(sortBy, meltedHuman, meltedAI) {
+    function groupBy(arr, key) {
+        return (arr || []).reduce((acc, row) => {
+            const groupKey = row[key];
+            acc[groupKey] = acc[groupKey] || [];
+            acc[groupKey].push(row);
+            return acc;
+        }, {});
+    }
+
+    function getMean(rows) {
+        return rows.reduce((sum, row) => sum + (row.Numerical_Score ?? 0), 0) / rows.length;
+    }
+
+    function getMedian(rows) {
+        const nums = rows.map(row => row.Numerical_Score).sort((a, b) => a - b);
+        const mid = Math.floor(nums.length / 2);
+        return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+    }
+
+    if (sortBy === 'mean') {
+        const grouped = groupBy([...(meltedHuman || []), ...(meltedAI || [])], 'Feature_Name');
+        return Object.keys(grouped).sort((a, b) => getMean(grouped[b]) - getMean(grouped[a]));
+    }
+    if (sortBy === 'human_mean') {
+        const grouped = groupBy(meltedHuman, 'Feature_Name');
+        return Object.keys(grouped).sort((a, b) => getMean(grouped[b]) - getMean(grouped[a]));
+    }
+    if (sortBy === 'ai_mean') {
+        const grouped = groupBy(meltedAI, 'Feature_Name');
+        return Object.keys(grouped).sort((a, b) => getMean(grouped[b]) - getMean(grouped[a]));
+    }
+    if (sortBy === 'difference') {
+        const groupedH = groupBy(meltedHuman, 'Feature_Name');
+        const groupedA = groupBy(meltedAI, 'Feature_Name');
+        const allFeatures = Array.from(new Set([...Object.keys(groupedH), ...Object.keys(groupedA)]));
+        return allFeatures.sort((a, b) => {
+            const meanH_A = groupedH[a] ? getMean(groupedH[a]) : 0;
+            const meanA_A = groupedA[a] ? getMean(groupedA[a]) : 0;
+            const meanH_B = groupedH[b] ? getMean(groupedH[b]) : 0;
+            const meanA_B = groupedA[b] ? getMean(groupedA[b]) : 0;
+            return (meanH_B - meanA_B) - (meanH_A - meanA_A);
+        });
+    }
+    if (sortBy === 'median') {
+        const grouped = groupBy([...(meltedHuman || []), ...(meltedAI || [])], 'Feature_Name');
+        return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
+    }
+    if (sortBy === 'human_median') {
+        const grouped = groupBy(meltedHuman, 'Feature_Name');
+        return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
+    }
+    if (sortBy === 'ai_median') {
+        const grouped = groupBy(meltedAI, 'Feature_Name');
+        return Object.keys(grouped).sort((a, b) => getMedian(grouped[b]) - getMedian(grouped[a]));
+    }
+    if (sortBy === 'difference_median') {
+        const groupedH = groupBy(meltedHuman, 'Feature_Name');
+        const groupedA = groupBy(meltedAI, 'Feature_Name');
+        const allFeatures = Array.from(new Set([...Object.keys(groupedH), ...Object.keys(groupedA)]));
+        return allFeatures.sort((a, b) => {
+            const medH_A = groupedH[a] ? getMedian(groupedH[a]) : 0;
+            const medA_A = groupedA[a] ? getMedian(groupedA[a]) : 0;
+            const medH_B = groupedH[b] ? getMedian(groupedH[b]) : 0;
+            const medA_B = groupedA[b] ? getMedian(groupedA[b]) : 0;
+            return (medH_B - medA_B) - (medH_A - medA_A);
+        });
+    }
+
+    return getFeatureSortOrder('mean', meltedHuman, meltedAI);
+}
+
+function getContextFeatureSortOrder(sortBy, rows, fallbackFeatures) {
+    const features = Array.isArray(fallbackFeatures) ? fallbackFeatures.slice() : [];
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return features;
+    }
+
+    const grouped = rows.reduce((acc, row) => {
+        const key = row.Feature_Name;
+        acc[key] = acc[key] || [];
+        acc[key].push(row.Numerical_Score);
+        return acc;
+    }, {});
+
+    function median(values) {
+        const sorted = values.slice().sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+
+    const metric = (sortBy === 'median' || sortBy === 'human_median') ? 'median' : 'mean';
+    const ordered = Object.keys(grouped).sort((a, b) => {
+        const valuesA = grouped[a];
+        const valuesB = grouped[b];
+        const scoreA = metric === 'median'
+            ? median(valuesA)
+            : valuesA.reduce((sum, value) => sum + value, 0) / valuesA.length;
+        const scoreB = metric === 'median'
+            ? median(valuesB)
+            : valuesB.reduce((sum, value) => sum + value, 0) / valuesB.length;
+        return scoreB - scoreA;
+    });
+
+    features.forEach(feature => {
+        if (!ordered.includes(feature)) {
+            ordered.push(feature);
+        }
+    });
+
+    return ordered;
+}
+
 /**
  * Builds Plotly traces from grouped data.
  * @param {Array<Object>} data - Data array
@@ -109,5 +222,7 @@ if (typeof window !== 'undefined') {
     window.filterValidTraces = filterValidTraces;
     window.getAxisTicks = getAxisTicks;
     window.getLikertYAxisTicks = getLikertYAxisTicks;
+    window.getFeatureSortOrder = getFeatureSortOrder;
+    window.getContextFeatureSortOrder = getContextFeatureSortOrder;
     window.buildTracesFromGroups = buildTracesFromGroups;
 }

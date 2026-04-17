@@ -1,6 +1,6 @@
 // Backend fetch and response normalization for aggregated chart data
 
-const BACKEND_API_URL = 'https://script.google.com/macros/s/AKfycbzhOD2dWN2yhnX2xeGNKhek5aBYXXRuo6okg_sYAkMqngOoOV571oDi5w_QfrRWRKjv/exec';
+const BACKEND_API_URL = 'https://script.google.com/macros/s/AKfycbwGAibcEAKzTwJ0lK6Kj6gaOA3Q2RU8cFMM-F37yrjijlizPQl37QtjNa-WH4kKQLbj/exec';
 
 function normalizeBackendData(rawData) {
     if (!rawData || typeof rawData !== 'object') rawData = {};
