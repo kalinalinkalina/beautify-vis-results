@@ -81,3 +81,15 @@ select {
 #tab-contexts {
     min-height: 240px;
 }
+
+#tab-contexts .context-view-controls {
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+#tab-contexts .context-view-controls label {
+    margin-bottom: 0;
+}

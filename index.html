@@ -26,13 +26,14 @@
             <select id="chart-type">
                 <option value="box">Box Plot</option>
                 <option value="line">Line Chart of Means</option>
-                <option value="slope">Slope Chart</option>
+                <option value="slope">Slope Chart (Human-AI)</option>
                 <option value="swarm">Swarm Plot</option>
             </select>
         </div>
         <div>
             <label for="comparison-type">Comparison Type</label>
             <select id="comparison-type">
+                <option value="summary" selected>Summary</option>
                 <option value="human_ai">Human vs AI</option>
                 <option value="role">Role</option>
                 <option value="experience">Years of vis experience</option>
@@ -66,6 +67,14 @@
         </div>
     </div>
     <div id="tab-contexts" class="tab-panel" role="tabpanel" aria-labelledby="tab-contexts-button">
+        <div class="context-view-controls">
+            <label for="context-view">View</label>
+            <select id="context-view">
+                <option value="use_cases">Use Cases</option>
+                <option value="comfort">Comfort</option>
+                <option value="importance">Importance</option>
+            </select>
+        </div>
         <div style="padding:40px;text-align:center;color:#666;font-size:1rem;">Not implemented yet.</div>
     </div>
 </body>

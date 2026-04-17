@@ -11,6 +11,12 @@ const PLOTLY_QUALITATIVE_COLORS = [
 ];
 
 const COMPARISON_CONFIG = {
+    summary: {
+        column: null,
+        label: 'Summary',
+        order: null,
+        colorMap: { 'Summary': '#1f77b4' }
+    },
     human_ai: {
         column: null,
         label: 'Human vs AI',

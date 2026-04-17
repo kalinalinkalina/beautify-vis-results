@@ -3,11 +3,11 @@
  * API endpoint for returning ONLY AGGREGATED DATA (never raw data) for IRB compliance.
  *
  * Query Parameters:
- *   chartType: 'box' | 'line' (default: 'box')
- *   comparisonType: e.g., 'human_ai', 'role', etc. (default: 'human_ai')
+ *   chartType: 'box' | 'line' | 'slope' | 'swarm' (default: 'box')
+ *   comparisonType: e.g., 'summary', 'human_ai', 'role', etc. (default: 'summary')
  *
  * Returns:
- *   JSON object with only aggregated data (box plot or line chart aggregations).
+ *   JSON object with only aggregated data (box plot, line chart, slope chart, or swarm chart aggregations).
  *   Never returns raw or row-level data.
  *
  * IRB Compliance: This endpoint is guaranteed to never expose raw data.
@@ -20,7 +20,9 @@ function doGet(e) {
 
   // Query parameters
   const chartType = e.parameter.chartType || 'box';
-  const comparisonType = e.parameter.comparisonType || 'human_ai';
+  const comparisonType = e.parameter.comparisonType || 'summary';
+  const callback = e.parameter.callback;
+  const callbackName = callback && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(callback) ? callback : null;
 
   // Clean and structure data
   const data = cleanData(values);
@@ -39,17 +41,21 @@ function doGet(e) {
     result = {error: 'Chart type not implemented.'};
   }
 
-  // Defensive: Never allow raw data to be returned
   if (result && Array.isArray(result) && chartType !== 'swarm') { // Allow array for swarm
-    // If somehow an array (raw data) is returned, block it
     return ContentService
       .createTextOutput(JSON.stringify({error: 'Raw data access is forbidden by IRB policy.'}))
       .setMimeType(ContentService.MimeType.JSON);
   }
 
-  // CORS header for cross-origin requests
+  const json = JSON.stringify(result);
+  if (callbackName) {
+    return ContentService
+      .createTextOutput(`${callbackName}(${json})`)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
   return ContentService
-    .createTextOutput(JSON.stringify(result))
+    .createTextOutput(json)
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -67,6 +73,7 @@ const LIKERT_MAP = {
 };
 
 const COMPARISON_CONFIG = {
+  summary: { column: null, label: 'Summary' },
   human_ai: { column: null, label: 'Human vs AI' },
   role: { column: 'Vis_Role', label: 'Role' },
   experience: { column: 'Vis_Length', label: 'Years of vis experience' },
@@ -90,7 +97,7 @@ function getComparisonLabel(comparisonType) {
  *
  * GET endpoint (doGet):
  *   - chartType: 'box', 'line', or 'slope'
- *   - comparisonType: 'human_ai', 'role', 'experience', 'frequency_vis', 'frequency_public', 'domain', 'age', 'tool_use'
+ *   - comparisonType: 'human_ai', 'summary', 'role', 'experience', 'frequency_vis', 'frequency_public', 'domain', 'age', 'tool_use'
  *
  * Returns:
  *   For 'box': { features, groups, data, humanGroups, aiGroups, groupCounts }
@@ -203,6 +210,8 @@ function aggregateSwarmPlot(data, comparisonType) {
       const scores = collectScores(data, comparisonType, group, feature);
       if (comparisonType === 'human_ai') {
         output.data[feature][group] = scores[group === 'Human' ? 'human' : 'ai'];
+      } else if (comparisonType === 'summary') {
+        output.data[feature][group] = scores.human.concat(scores.ai);
       } else {
         output.data[feature][group] = scores.human;
       }
@@ -246,13 +255,15 @@ function aggregateBoxPlot(data, comparisonType) {
   // For each group and feature, collect all scores
   groups.forEach(group => {
     output.data[group] = {};
-    if (comparisonType !== 'human_ai') {
+    if (comparisonType !== 'human_ai' && comparisonType !== 'summary') {
       output.data[group + '__AI'] = {};
     }
     FEATURES.forEach(feat => {
       const scores = collectScores(data, comparisonType, group, feat);
       if (comparisonType === 'human_ai') {
         output.data[group][feat] = scores[group === 'Human' ? 'human' : 'ai'];
+      } else if (comparisonType === 'summary') {
+        output.data[group][feat] = scores.human.concat(scores.ai);
       } else {
         output.data[group][feat] = scores.human;
         output.data[group + '__AI'][feat] = scores.ai;
@@ -260,7 +271,7 @@ function aggregateBoxPlot(data, comparisonType) {
     });
   });
   // Add AI group keys for frontend
-  if (comparisonType !== 'human_ai') {
+  if (comparisonType !== 'human_ai' && comparisonType !== 'summary') {
     output.groups.forEach(g => {
       output.aiGroups.push(g + '__AI');
     });
@@ -302,12 +313,28 @@ function aggregateLineChart(data, comparisonType) {
     output.stdsAI[group] = {};
     FEATURES.forEach(feat => {
       const scores = collectScores(data, comparisonType, group, feat);
-      output.meansHuman[group][feat] = calculateMean(scores.human);
-      output.stdsHuman[group][feat] = calculateStdDev(scores.human);
-      output.meansAI[group][feat] = calculateMean(scores.ai);
-      output.stdsAI[group][feat] = calculateStdDev(scores.ai);
-      if (comparisonType === 'human_ai') {
-        output.means[group][feat] = group === 'Human' ? output.meansHuman[group][feat] : output.meansAI[group][feat];
+      if (comparisonType === 'summary') {
+        const combined = scores.human.concat(scores.ai);
+        output.means[group][feat] = calculateMean(combined);
+        output.meansHuman[group][feat] = calculateMean(combined);
+        output.stdsHuman[group][feat] = calculateStdDev(combined);
+        output.meansAI[group][feat] = calculateMean(combined);
+        output.stdsAI[group][feat] = calculateStdDev(combined);
+      } else if (comparisonType === 'human_ai') {
+        if (group === 'Human') {
+          output.meansHuman[group][feat] = calculateMean(scores.human);
+          output.stdsHuman[group][feat] = calculateStdDev(scores.human);
+          output.means[group][feat] = output.meansHuman[group][feat];
+        } else {
+          output.meansAI[group][feat] = calculateMean(scores.ai);
+          output.stdsAI[group][feat] = calculateStdDev(scores.ai);
+          output.means[group][feat] = output.meansAI[group][feat];
+        }
+      } else {
+        output.meansHuman[group][feat] = calculateMean(scores.human);
+        output.stdsHuman[group][feat] = calculateStdDev(scores.human);
+        output.meansAI[group][feat] = calculateMean(scores.ai);
+        output.stdsAI[group][feat] = calculateStdDev(scores.ai);
       }
     });
   });
@@ -325,6 +352,8 @@ function aggregateSlopeChart(data, comparisonType) {
     groups: [],
     meansHuman: {},
     meansAI: {},
+    stdsHuman: {},
+    stdsAI: {},
     groupCounts: {},
     pairedData: [] // For individual responses in Human vs AI
   };
@@ -378,9 +407,17 @@ function aggregateSlopeChart(data, comparisonType) {
   groups.forEach(group => {
     output.meansHuman[group] = {};
     output.meansAI[group] = {};
+    output.stdsHuman[group] = {};
+    output.stdsAI[group] = {};
     FEATURES.forEach(feat => {
       const scores = collectScores(data, comparisonType, group, feat);
-      if (comparisonType === 'human_ai') {
+      if (comparisonType === 'summary') {
+        const combined = scores.human.concat(scores.ai);
+        output.meansHuman[group][feat] = calculateMean(combined);
+        output.meansAI[group][feat] = calculateMean(combined);
+        output.stdsHuman[group][feat] = calculateStdDev(combined);
+        output.stdsAI[group][feat] = calculateStdDev(combined);
+      } else if (comparisonType === 'human_ai') {
         if (group === 'Human') {
           output.meansHuman[group][feat] = calculateMean(scores.human);
         } else {
@@ -408,7 +445,24 @@ function getResponseGroupCount(data, prefix) {
   return data.filter(d => Object.keys(d).some(k => k.startsWith(prefix) && d[k] !== undefined && d[k] !== null && d[k] !== '')).length;
 }
 
+function getSummaryResponseCount(data) {
+  return data.filter(row => {
+    return Object.keys(row).some(key => {
+      return (key.startsWith('Acceptability_Human_') || key.startsWith('Acceptability_AI_')) && row[key] !== undefined && row[key] !== null && row[key] !== '';
+    });
+  }).length;
+}
+
 function getGroupsAndCounts(data, comparisonType) {
+  if (comparisonType === 'summary') {
+    return {
+      groups: ['Summary'],
+      groupCounts: {
+        Summary: getSummaryResponseCount(data)
+      }
+    };
+  }
+
   if (comparisonType === 'human_ai') {
     return {
       groups: ['Human', 'AI'],
@@ -418,7 +472,7 @@ function getGroupsAndCounts(data, comparisonType) {
       }
     };
   }
-
+  
   const comparisonColumn = getComparisonColumn(comparisonType);
   let groups = [];
   if (comparisonColumn === 'Domains') {
@@ -435,6 +489,17 @@ function getGroupsAndCounts(data, comparisonType) {
     }
   });
   return { groups, groupCounts };
+}
+
+function matchesGroup(row, comparisonType, group) {
+  if (comparisonType === 'human_ai' || comparisonType === 'summary') {
+    return true;
+  }
+  const comparisonColumn = getComparisonColumn(comparisonType);
+  if (comparisonColumn === 'Domains') {
+    return normalizeDomains(row['Domains']).includes(group);
+  }
+  return row[comparisonColumn] === group;
 }
 
 // --- Reusable helpers for score collection and mean calculation ---
@@ -461,17 +526,6 @@ function normalizeGroupValue(value) {
   if (value === undefined || value === null) return null;
   const normalized = String(value).trim();
   return normalized === '' ? null : normalized;
-}
-
-function matchesGroup(row, comparisonType, group) {
-  const comparisonColumn = getComparisonColumn(comparisonType);
-  if (comparisonType === 'human_ai') {
-    return true;
-  }
-  if (comparisonColumn === 'Domains') {
-    return normalizeDomains(row['Domains']).includes(group);
-  }
-  return row[comparisonColumn] === group;
 }
 
 function collectScores(data, comparisonType, group, feature) {

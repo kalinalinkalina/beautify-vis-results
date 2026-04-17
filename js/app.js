@@ -350,6 +350,33 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('human-plot').style.display = 'block';
             document.getElementById('ai-plot').style.display = 'none';
             return;
+        } else if (comparisonType === 'summary') {
+            const combined = [];
+            const groupName = backendData.groups[0] || 'Summary';
+            backendData.features.forEach(feat => {
+                (backendData.data[groupName] && backendData.data[groupName][feat] || []).forEach(score => {
+                    combined.push({ Feature_Name: feat, Numerical_Score: score, Type: groupName });
+                });
+            });
+            const featureOrder = getFeatureOrderFromBackend(sortBy, combined, combined);
+            makeBoxPlot(
+                combined,
+                'Feature_Name',
+                'Numerical_Score',
+                'Type',
+                {
+                    title: 'Overall Acceptability Summary',
+                    colorMap: comparisonConfig.colorMap || { [groupName]: '#444' },
+                    categoryOrders: { 'Feature_Name': featureOrder, 'Type': [groupName] },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Acceptability',
+                    showLegend: false
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
         }
 
         const { groupOrder, groupKey, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
@@ -437,6 +464,34 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('human-plot').style.display = 'block';
             document.getElementById('ai-plot').style.display = 'none';
             return;
+        } else if (comparisonType === 'summary') {
+            const groupName = backendData.groups[0] || 'Summary';
+            const combinedMeans = backendData.meansHuman[groupName] || {};
+            const combinedStds = backendData.stdsHuman[groupName] || {};
+            const traceName = `${groupName} (${backendData.groupCounts?.[groupName] || 0})`;
+            const featureOrder = getFeatureOrderFromBackend(
+                sortBy,
+                Object.entries(combinedMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
+                Object.entries(combinedMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
+            );
+            makeLineChart(
+                { [groupName]: combinedMeans },
+                featureOrder,
+                { [groupName]: comparisonConfig.colorMap ? comparisonConfig.colorMap[groupName] : '#444' },
+                [traceName],
+                {
+                    title: 'Overall Mean Acceptability Summary',
+                    legendTitle: 'Summary',
+                    traceNameMap: { [groupName]: traceName },
+                    groupOrder: [groupName],
+                    stdDevDict: { [groupName]: combinedStds },
+                    showLegend: false
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
         }
 
         const { groupOrder, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
@@ -504,6 +559,34 @@ document.addEventListener('DOMContentLoaded', function() {
                     traceNameMap: traceNameMap,
                     groupOrder: ['Human', 'AI'],
                     stdDevDict: { Human: humanStds, AI: aiStds }
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
+        } else if (comparisonType === 'summary') {
+            const groupName = backendData.groups[0] || 'Summary';
+            const combinedMeans = backendData.meansHuman[groupName] || {};
+            const combinedStds = backendData.stdsHuman[groupName] || {};
+            const traceName = `${groupName} (${backendData.groupCounts?.[groupName] || 0})`;
+            const featureOrder = getFeatureOrderFromBackend(
+                sortBy,
+                Object.entries(combinedMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score })),
+                Object.entries(combinedMeans).map(([Feature_Name, Numerical_Score]) => ({ Feature_Name, Numerical_Score }))
+            );
+            makeLineChart(
+                { [groupName]: combinedMeans },
+                featureOrder,
+                { [groupName]: comparisonConfig.colorMap ? comparisonConfig.colorMap[groupName] : '#444' },
+                [traceName],
+                {
+                    title: 'Overall Mean Acceptability Summary',
+                    legendTitle: 'Summary',
+                    traceNameMap: { [groupName]: traceName },
+                    groupOrder: [groupName],
+                    stdDevDict: { [groupName]: combinedStds },
+                    showLegend: false
                 },
                 'human-plot'
             );
@@ -603,6 +686,34 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('human-plot').style.display = 'block';
             document.getElementById('ai-plot').style.display = 'none';
             return;
+        } else if (comparisonType === 'summary') {
+            const groupName = backendData.groups[0] || 'Summary';
+            const combined = [];
+            backendData.features.forEach(feat => {
+                (backendData.data[feat][groupName] || []).forEach(score => {
+                    combined.push({ Feature_Name: feat, Numerical_Score: score, Type: groupName });
+                });
+            });
+            const featureOrder = getFeatureOrderFromBackend(sortBy, combined, combined);
+            makeSwarmPlot(
+                combined,
+                'Feature_Name',
+                'Numerical_Score',
+                'Type',
+                {
+                    title: 'Overall Acceptability Summary',
+                    colorMap: { [groupName]: comparisonConfig.colorMap ? comparisonConfig.colorMap[groupName] : '#444' },
+                    categoryOrders: { 'Feature_Name': featureOrder, 'Type': [groupName] },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Acceptability',
+                    traceNameMap: { [groupName]: groupName },
+                    showLegend: false
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
         }
 
         const { groupOrder, groupKey, colorMap, traceNameMap, labelMap } = buildGroupPresentation(comparisonType, backendData);
@@ -667,7 +778,54 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderContextsTab() {
         const container = document.getElementById('tab-contexts');
         if (!container) return;
-        container.innerHTML = '<div style="padding:40px;text-align:center;color:#666;font-size:1rem;">Contexts charts will be added here in a future update.</div>';
+        container.innerHTML = `
+            <div class="context-view-controls">
+                <label for="context-view">View</label>
+                <select id="context-view">
+                    <option value="use_cases">Use Cases</option>
+                    <option value="comfort">Comfort</option>
+                    <option value="importance">Importance</option>
+                </select>
+            </div>
+            <div style="padding:40px;text-align:center;color:#666;font-size:1rem;">Not implemented yet.</div>
+        `;
+    }
+
+    function updateComparisonAvailability(tabName = activeTab) {
+        const comparisonSelect = document.getElementById('comparison-type');
+        if (!comparisonSelect) return;
+        const humanAIOption = comparisonSelect.querySelector('option[value="human_ai"]');
+        const summaryOption = comparisonSelect.querySelector('option[value="summary"]');
+        const chartTypeSelect = document.getElementById('chart-type');
+        const chartType = chartTypeSelect ? chartTypeSelect.value : null;
+
+        const disableHumanAI = tabName === 'contexts';
+        if (humanAIOption) {
+            humanAIOption.disabled = disableHumanAI;
+            if (disableHumanAI) {
+                humanAIOption.setAttribute('aria-disabled', 'true');
+            } else {
+                humanAIOption.removeAttribute('aria-disabled');
+            }
+        }
+
+        const disableSummary = chartType === 'slope';
+        if (summaryOption) {
+            summaryOption.disabled = disableSummary;
+            if (disableSummary) {
+                summaryOption.setAttribute('aria-disabled', 'true');
+            } else {
+                summaryOption.removeAttribute('aria-disabled');
+            }
+        }
+
+        const selectedOption = comparisonSelect.querySelector(`option[value="${comparisonSelect.value}"]`);
+        if (selectedOption && selectedOption.disabled) {
+            const firstEnabledOption = comparisonSelect.querySelector('option:not([disabled])');
+            if (firstEnabledOption) {
+                comparisonSelect.value = firstEnabledOption.value;
+            }
+        }
     }
 
     function loadTabData(tabName) {
@@ -684,7 +842,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let showHumanPlot = true;
         let showAIPlot = false;
         if (chartType === 'box' || chartType === 'line' || chartType === 'swarm') {
-            showAIPlot = comparisonType !== 'human_ai';
+            showAIPlot = comparisonType !== 'human_ai' && comparisonType !== 'summary';
         }
         setPlotVisibility(showHumanPlot, showAIPlot);
 
@@ -746,7 +904,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Only fetch data when chart-type or comparison-type changes
-    document.getElementById('chart-type').addEventListener('change', refreshBackendData);
+    document.getElementById('chart-type').addEventListener('change', function() {
+        updateComparisonAvailability();
+        refreshBackendData();
+    });
     document.getElementById('comparison-type').addEventListener('change', refreshBackendData);
     // Only re-sort and re-plot when sort-by changes (no backend call)
     document.getElementById('sort-by').addEventListener('change', function() {
@@ -771,6 +932,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         activeTab = tabName;
+        updateComparisonAvailability(tabName);
         loadTabData(tabName)
             .then(() => {
                 const renderer = TAB_RENDERERS[tabName];

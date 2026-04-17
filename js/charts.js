@@ -94,13 +94,15 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         xaxisTitle = '',
         yaxisTitle = '',
         legendOrder = null,
-        traceNameMap = null
+        traceNameMap = null,
+        showLegend = true
     } = options || {};
 
     const traces = window.buildTracesFromGroups(data, color, x, y, {
         colorMap,
         traceType: 'box',
-        traceNameMap: traceNameMap || {}
+        traceNameMap: traceNameMap || {},
+        showLegend
     });
     const xVals = [...new Set(data.map(row => row[x]))];
     const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(xVals, window.FEATURE_LABELS || {});
@@ -139,6 +141,7 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
             ticktext: yTickText
         },
         legendOptions: legendOrder ? { traceorder: 'normal' } : {},
+        showLegend,
         margin: { r: 180 }
     });
     layout.boxmode = 'group';
@@ -156,6 +159,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     options = options || {};
     const title = options.title || '';
     const legendTitle = options.legendTitle || '';
+    const showLegend = options.showLegend !== false;
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
     const stdDevDict = options.stdDevDict || null;
     const forceAIStyle = options.forceAIStyle || false;
@@ -305,6 +309,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             line: { color: legendColors[group] || undefined, width: 2 },
             marker,
             connectgaps: true,
+            showlegend: showLegend,
             legendgroup: group,
             layer: 'above',
             isConfidenceBand: false
@@ -324,6 +329,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     if (sharedLayout) {
         layout = Object.assign({}, sharedLayout, {
             title,
+            showlegend: showLegend,
             legend: Object.assign({}, sharedLayout.legend || {}, getPlotlyLegendConfig({ title: { text: legendTitle } }))
         });
     } else {
@@ -335,6 +341,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             xaxis: buildXAxisConfig('Type of Alteration', xTickVals, xTickText, 30, 'category'),
             yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
             legendOptions: { title: { text: legendTitle } },
+            showLegend,
             height: 500,
             margin: { r: 180 }
         });
@@ -348,6 +355,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     options = options || {};
     const title = options.title || '';
     const legendTitle = options.legendTitle || '';
+    const showLegend = options.showLegend !== false;
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
     const isGrouped = options.isGrouped || false;
     const groupOrder = options.groupOrder || legendOrder;
@@ -416,7 +424,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                         color: legendColors[group] || '#222',
                         opacity: 1
                     },
-                    showlegend: featureIdx === 0,
+                    showlegend: showLegend && featureIdx === 0,
                     legendgroup: group,
                     hovertemplate: `<b>${group}</b><br>Human: ${humanMean.toFixed(2)}<extra></extra>`,
                     name: traceNameMap[group] || group
@@ -456,33 +464,33 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 legendgroup: 'human'
             });
 
-            traces.push({
-                x: [humanX],
-                y: [humanMean],
-                mode: 'markers',
+                traces.push({
+                    x: [humanX],
+                    y: [humanMean],
+                    mode: 'markers',
                 marker: {
                     size: 12,
                     symbol: 'circle',
                     color: legendColors['Human'] || 'peru',
                     opacity: 1
                 },
-                showlegend: feature === featureOrder[0],
+                showlegend: showLegend && feature === featureOrder[0],
                 legendgroup: 'human',
                 hovertemplate: `Human: ${humanMean.toFixed(2)}<extra></extra>`,
                 name: 'Human'
             });
 
-            traces.push({
-                x: [aiX],
-                y: [aiMean],
-                mode: 'markers',
+                traces.push({
+                    x: [aiX],
+                    y: [aiMean],
+                    mode: 'markers',
                 marker: {
                     size: 12,
                     symbol: 'circle',
                     color: '#fff',
                     line: { color: legendColors['AI'] || 'gray', width: 3 }
                 },
-                showlegend: feature === featureOrder[0],
+                showlegend: showLegend && feature === featureOrder[0],
                 legendgroup: 'ai',
                 hovertemplate: `AI: ${aiMean.toFixed(2)}<extra></extra>`,
                 name: 'AI'
@@ -498,6 +506,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
         xaxis: buildXAxisConfig('Type of Alteration', featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
         yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
         legendOptions: { title: { text: legendTitle } },
+        showLegend,
         margin: { r: 180 }
     });
     const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
@@ -518,7 +527,8 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         legendOrder = null,
         jitterAmplitude = 0.54,
         markerSize = 7,
-        markerOpacity = 0.65
+        markerOpacity = 0.65,
+        showLegend = true
     } = options;
 
     const rawFeatureOrder = categoryOrders[x] || [...new Set(data.map(row => row[x]))];
@@ -572,7 +582,7 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
             text: textLabels,
             hovertemplate: `<b>${traceName}</b><br>%{text}<br>Acceptability: %{y}<extra></extra>`,
             legendgroup: traceName,
-            showlegend: true
+            showlegend: showLegend
         });
     });
 
@@ -583,6 +593,7 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         xaxis: buildXAxisConfig(xaxisTitle, featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
         yaxis: buildYAxisConfig(yaxisTitle, yTickVals, yTickText, true),
         legendOptions: { traceorder: legendTraceOrder },
+        showLegend,
         margin: { r: 180 }
     });
     const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
@@ -599,11 +610,12 @@ function hexToRgba(hex, alpha) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function buildDefaultPlotLayout({ title = '', xaxis = {}, yaxis = {}, legendOptions = {}, height = 500, margin = { r: 180 }, hovermode = 'closest' } = {}) {
+function buildDefaultPlotLayout({ title = '', xaxis = {}, yaxis = {}, legendOptions = {}, showLegend = true, height = 500, margin = { r: 180 }, hovermode = 'closest' } = {}) {
     return {
         title,
         xaxis,
         yaxis,
+        showlegend: showLegend,
         legend: getPlotlyLegendConfig(legendOptions),
         height,
         margin,

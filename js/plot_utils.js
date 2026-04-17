@@ -50,7 +50,8 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
         colorMap = {},
         traceType = 'box',
         markerOptions = {},
-        traceNameMap = {}
+        traceNameMap = {},
+        showLegend = true
     } = options;
     const groups = [...new Set(data.map(row => row[groupCol]))];
     return groups.map(group => {
@@ -69,7 +70,8 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
                 line: { width: 2 },
                 median: { line: { width: 6 } },
                 offsetgroup: traceName,
-                legendgroup: traceName
+                legendgroup: traceName,
+                showlegend: showLegend
             };
         } else if (traceType === 'line') {
             return {
@@ -79,7 +81,8 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
                 mode: 'lines+markers',
                 marker: marker,
                 line: { color: colorMap[group] || undefined, width: 2 },
-                connectgaps: true
+                connectgaps: true,
+                showlegend: showLegend
             };
         }
         return null;
