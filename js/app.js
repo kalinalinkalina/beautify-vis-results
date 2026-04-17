@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- State ---
     let backendData = null;
+    let activeTab = 'alterations';
 
     // --- Utility: shared comparison metadata ---
     function getComparisonConfig(comparisonType) {
@@ -654,6 +655,29 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('ai-plot').style.display = 'block';
     }
 
+    const TAB_RENDERERS = {
+        alterations: renderAlterationsTab,
+        contexts: renderContextsTab
+    };
+
+    function renderAlterationsTab() {
+        updatePlots();
+    }
+
+    function renderContextsTab() {
+        const container = document.getElementById('tab-contexts');
+        if (!container) return;
+        container.innerHTML = '<div style="padding:40px;text-align:center;color:#666;font-size:1rem;">Contexts charts will be added here in a future update.</div>';
+    }
+
+    function loadTabData(tabName) {
+        if (tabName === 'alterations') {
+            return refreshBackendData();
+        }
+        // Future: replace with context-specific data loading logic when Contexts data becomes available
+        return Promise.resolve();
+    }
+
     // --- Main plot update logic ---
     function updatePlots() {
         const { chartType, comparisonType, sortBy } = getSelections();
@@ -714,6 +738,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Event listeners ---
 
+    document.getElementById('tab-alterations-button').addEventListener('click', function() {
+        switchTab('alterations');
+    });
+    document.getElementById('tab-contexts-button').addEventListener('click', function() {
+        switchTab('contexts');
+    });
+
     // Only fetch data when chart-type or comparison-type changes
     document.getElementById('chart-type').addEventListener('change', refreshBackendData);
     document.getElementById('comparison-type').addEventListener('change', refreshBackendData);
@@ -722,7 +753,41 @@ document.addEventListener('DOMContentLoaded', function() {
         updatePlots();
     });
 
-    // Initial load
-    refreshBackendData();
+    // Initial tab state and load
+    switchTab('alterations');
+
+    function switchTab(tabName) {
+        const tabIds = ['alterations', 'contexts'];
+        tabIds.forEach(id => {
+            const panel = document.getElementById(`tab-${id}`);
+            const button = document.getElementById(`tab-${id}-button`);
+            const isActive = id === tabName;
+            if (panel) {
+                panel.classList.toggle('active', isActive);
+            }
+            if (button) {
+                button.classList.toggle('active', isActive);
+                button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            }
+        });
+        activeTab = tabName;
+        loadTabData(tabName)
+            .then(() => {
+                const renderer = TAB_RENDERERS[tabName];
+                if (typeof renderer === 'function') {
+                    renderer();
+                }
+            })
+            .catch(err => {
+                console.error(`Error loading data for tab ${tabName}:`, err);
+            });
+    }
+
+    function renderActiveTab() {
+        const renderer = TAB_RENDERERS[activeTab];
+        if (typeof renderer === 'function') {
+            renderer();
+        }
+    }
 
 });
