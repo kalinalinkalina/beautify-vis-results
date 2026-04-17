@@ -1,23 +1,17 @@
-// Attach to window for global access
-window.generateColorScale = generateColorScale;
-
-// Utility function to generate a color scale dynamically
-function generateColorScale(legend) {
-    const colors = window.DEFAULT_COLOR_PALETTE || [
-        '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
-        '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
-    ];
-    const colorMap = {};
-    legend.forEach((item, index) => {
-        colorMap[item] = colors[index % colors.length]; // Cycle through colors if legend is longer than the palette
-    });
-    return colorMap;
-}
-
-// Entry point for dashboard logic
-// TODO: Implement data loading, cleaning, and plotting logic here
-
 document.addEventListener('DOMContentLoaded', function() {
+    // --- Utility function to generate a color scale dynamically ---
+    function generateColorScale(legend) {
+        const colors = window.DEFAULT_COLOR_PALETTE || [
+            '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
+            '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
+        ];
+        const colorMap = {};
+        legend.forEach((item, index) => {
+            colorMap[item] = colors[index % colors.length];
+        });
+        return colorMap;
+    }
+
     // --- Spinner utility ---
     const spinner = document.getElementById('spinner');
     function showSpinner() {
@@ -26,7 +20,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function hideSpinner() {
         if (spinner) spinner.style.display = 'none';
     }
-    // Usage: Call showSpinner() before a server request and hideSpinner() in .finally() or after response.
+    const API_URL = 'https://script.google.com/macros/s/AKfycbzed7aTbsJ6ZqibTeWoyRIv-Wp1mJllNMzPSFw64Ju0naXl7l6QW6KxAj98R_AdzaCs/exec';
     // --- Constants ---
     // The app now uses shared comparison and palette metadata from js/metadata.js.
 
@@ -168,10 +162,10 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             const missingGroups = rawGroups.filter(rawGroup => !colorMap[rawGroup]);
             if (missingGroups.length) {
-                Object.assign(colorMap, window.generateColorScale(missingGroups));
+                Object.assign(colorMap, generateColorScale(missingGroups));
             }
         } else {
-            colorMap = meta.colorMap || window.generateColorScale(rawGroups);
+            colorMap = meta.colorMap || generateColorScale(rawGroups);
         }
         let groupOrder = rawGroups.slice();
         const traceNameMap = {};
@@ -210,7 +204,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (!colorMap) {
-            colorMap = window.generateColorScale(groupOrder);
+            colorMap = generateColorScale(groupOrder);
         }
 
         return { rawGroups, groupOrder, groupKey, colorMap, traceNameMap };
@@ -599,7 +593,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         groupKey,
                         {
                             title: `Swarm Plot: Acceptability of Human Alterations by ${comparisonLabel}`,
-                            colorMap: colorMap || window.generateColorScale(groupOrder),
+                            colorMap: colorMap || generateColorScale(groupOrder),
                             categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
                             xaxisTitle: 'Type of Alteration',
                             yaxisTitle: 'Acceptability',
@@ -614,7 +608,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         groupKey,
                         {
                             title: `Swarm Plot: Acceptability of AI Alterations by ${comparisonLabel}`,
-                            colorMap: colorMap || window.generateColorScale(groupOrder),
+                            colorMap: colorMap || generateColorScale(groupOrder),
                             categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
                             xaxisTitle: 'Type of Alteration',
                             yaxisTitle: 'Acceptability',
@@ -673,6 +667,3 @@ document.addEventListener('DOMContentLoaded', function() {
     fetchAggregatedData();
 
 });
-
-// Backend API endpoint for aggregated data
-const API_URL = 'https://script.google.com/macros/s/AKfycbzed7aTbsJ6ZqibTeWoyRIv-Wp1mJllNMzPSFw64Ju0naXl7l6QW6KxAj98R_AdzaCs/exec';
