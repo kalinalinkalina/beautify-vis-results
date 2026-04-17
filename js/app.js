@@ -1248,7 +1248,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        const disableSummary = chartType === 'slope';
+        const disableSummary = false;
         if (summaryOption) {
             summaryOption.disabled = disableSummary;
             if (disableSummary) {
