@@ -1,6 +1,6 @@
 // Backend fetch and response normalization for aggregated chart data
 
-const BACKEND_API_URL = 'https://script.google.com/macros/s/AKfycbyDtDbdVugEUBLnLpH7DJYUGkSiIBPU6Zsqedk-Po-3X_IcWsu2S1zMu9umZStyZYQ1/exec';
+const BACKEND_API_URL = 'https://script.google.com/macros/s/AKfycbzhOD2dWN2yhnX2xeGNKhek5aBYXXRuo6okg_sYAkMqngOoOV571oDi5w_QfrRWRKjv/exec';
 
 function normalizeBackendData(rawData) {
     if (!rawData || typeof rawData !== 'object') rawData = {};
@@ -8,6 +8,7 @@ function normalizeBackendData(rawData) {
         groups: Array.isArray(rawData.groups) ? rawData.groups : [],
         features: Array.isArray(rawData.features) ? rawData.features : [],
         data: rawData.data || {},
+        stds: rawData.stds || {},
         dataHuman: rawData.dataHuman || {},
         dataAI: rawData.dataAI || {},
         means: rawData.means || {},
@@ -57,8 +58,10 @@ function loadJsonp(url) {
     });
 }
 
-async function fetchAggregatedData(chartType, comparisonType) {
-    const url = `${BACKEND_API_URL}?chartType=${encodeURIComponent(chartType)}&comparisonType=${encodeURIComponent(comparisonType)}`;
+async function fetchAggregatedData(chartType, comparisonType, options = {}) {
+    const tab = options.tab || 'alterations';
+    const view = options.view || 'importance';
+    const url = `${BACKEND_API_URL}?chartType=${encodeURIComponent(chartType)}&comparisonType=${encodeURIComponent(comparisonType)}&tab=${encodeURIComponent(tab)}&view=${encodeURIComponent(view)}`;
     const isLocal = typeof window !== 'undefined' && (
         window.location.hostname === 'localhost' ||
         window.location.hostname === '127.0.0.1' ||

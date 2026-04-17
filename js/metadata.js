@@ -123,7 +123,85 @@ const FEATURE_LABELS = {
     "Position": "Changing Positions",
     "FeatureOmission": "Feature Omission",
     "FeatureAddition": "Feature Addition",
-    "Shape": "Changing Shape"
+    "Shape": "Changing Shape",
+    "Use_Cases_1": "Social Media Post",
+    "Use_Cases_2": "Research Paper",
+    "Use_Cases_3": "Research Conference Slide",
+    "Use_Cases_4": "Public Talk Slide",
+    "Use_Cases_5": "Press Release",
+    "Use_Cases_6": "Grant Proposal",
+    "Comfort_1": "Validated by an Expert",
+    "Comfort_2": "Understand Data-to-Visual Mapping",
+    "Comfort_3": "AI Use Was Disclosed",
+    "Comfort_4": "Detailed AI Process Information",
+    "Importance_1": "Ability to Revise or Iterate",
+    "Importance_2": "Understand What Changed and Why"
+};
+
+const RESPONSE_SCALES = {
+    acceptability: {
+        title: 'Acceptability',
+        tickvals: [0, 1, 2, 3, 4, 5],
+        ticktext: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
+        range: [-0.5, 5.5]
+    },
+    use_case_acceptability: {
+        title: 'Acceptability',
+        tickvals: [0, 1, 2, 3, 4],
+        ticktext: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Always (4)"],
+        range: [-0.5, 4.5]
+    },
+    comfort_importance: {
+        title: 'Importance',
+        tickvals: [0, 1, 2, 3, 4],
+        ticktext: [
+            "Not at all (0)",
+            "Slightly (1)",
+            "Moderately (2)",
+            "Very (3)",
+            "Extremely (4)"
+        ],
+        range: [-0.5, 4.5]
+    },
+    importance: {
+        title: 'Importance',
+        tickvals: [0, 1, 2, 3, 4],
+        ticktext: [
+            "Not at all (0)",
+            "Slightly (1)",
+            "Moderately (2)",
+            "Very much (3)",
+            "Extremely (4)"
+        ],
+        range: [-0.5, 4.5]
+    }
+};
+
+const CONTEXT_VIEW_CONFIG = {
+    use_cases: {
+        label: 'Use Cases',
+        features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
+        responseScale: 'use_case_acceptability',
+        plotTitlePrefix: 'Use Case',
+        combineFeatures: true,
+        combinedPlotTitle: 'How acceptable would you find using AI-enhanced images in the following contexts?'
+    },
+    comfort: {
+        label: 'Comfort',
+        features: ['Comfort_1', 'Comfort_2', 'Comfort_3', 'Comfort_4'],
+        responseScale: 'comfort_importance',
+        plotTitlePrefix: 'Comfort',
+        combineFeatures: true,
+        combinedPlotTitle: 'How important is each condition for your comfort with using AI-enhanced images?'
+    },
+    importance: {
+        label: 'Importance',
+        features: ['Importance_1', 'Importance_2'],
+        responseScale: 'importance',
+        plotTitlePrefix: 'Importance',
+        combineFeatures: true,
+        combinedPlotTitle: 'How important is each of the following in a visual enhancement process?'
+    }
 };
 
 if (typeof window !== 'undefined') {
@@ -131,4 +209,6 @@ if (typeof window !== 'undefined') {
     window.PLOTLY_QUALITATIVE_COLORS = PLOTLY_QUALITATIVE_COLORS;
     window.COMPARISON_CONFIG = COMPARISON_CONFIG;
     window.FEATURE_LABELS = FEATURE_LABELS;
+    window.RESPONSE_SCALES = RESPONSE_SCALES;
+    window.CONTEXT_VIEW_CONFIG = CONTEXT_VIEW_CONFIG;
 }

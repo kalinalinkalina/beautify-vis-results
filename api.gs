@@ -21,6 +21,8 @@ function doGet(e) {
   // Query parameters
   const chartType = e.parameter.chartType || 'box';
   const comparisonType = e.parameter.comparisonType || 'summary';
+  const tab = e.parameter.tab || 'alterations';
+  const view = e.parameter.view || 'importance';
   const callback = e.parameter.callback;
   const callbackName = callback && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(callback) ? callback : null;
 
@@ -29,7 +31,21 @@ function doGet(e) {
 
   // Aggregation (NO RAW DATA RETURNED)
   let result = {};
-  if (chartType === 'box') {
+  if (tab === 'contexts') {
+    if (comparisonType === 'human_ai') {
+      result = { error: 'The Human vs AI comparison is not available for contexts.' };
+    } else if (chartType === 'slope') {
+      result = { error: 'Slope charts are not available for contexts.' };
+    } else if (chartType === 'box') {
+      result = aggregateContextBoxPlot(data, comparisonType, view);
+    } else if (chartType === 'line') {
+      result = aggregateContextLineChart(data, comparisonType, view);
+    } else if (chartType === 'swarm') {
+      result = aggregateContextSwarmPlot(data, comparisonType, view);
+    } else {
+      result = { error: 'Chart type not implemented.' };
+    }
+  } else if (chartType === 'box') {
     result = aggregateBoxPlot(data, comparisonType);
   } else if (chartType === 'line') {
     result = aggregateLineChart(data, comparisonType);
@@ -72,6 +88,41 @@ const LIKERT_MAP = {
   0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5
 };
 
+const USE_CASE_LIKERT_MAP = {
+  'Never acceptable': 0, 'Rarely acceptable': 1, 'Sometimes acceptable': 2,
+  'Often acceptable': 3, 'Always acceptable': 4,
+  0: 0, 1: 1, 2: 2, 3: 3, 4: 4
+};
+
+const CONTEXT_VIEW_CONFIG = {
+  use_cases: {
+    features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
+    valueMap: USE_CASE_LIKERT_MAP
+  },
+  comfort: {
+    features: ['Comfort_1', 'Comfort_2', 'Comfort_3', 'Comfort_4'],
+    valueMap: {
+      'Not at all important': 0,
+      'Slightly important': 1,
+      'Moderately important': 2,
+      'Very important': 3,
+      'Extremely important': 4,
+      0: 0, 1: 1, 2: 2, 3: 3, 4: 4
+    }
+  },
+  importance: {
+    features: ['Importance_1', 'Importance_2'],
+    valueMap: {
+      'Not at all': 0,
+      'Slightly': 1,
+      'Moderately': 2,
+      'Very much': 3,
+      'Extremely': 4,
+      0: 0, 1: 1, 2: 2, 3: 3, 4: 4
+    }
+  }
+};
+
 const COMPARISON_CONFIG = {
   summary: { column: null, label: 'Summary' },
   human_ai: { column: null, label: 'Human vs AI' },
@@ -110,6 +161,7 @@ function getComparisonLabel(comparisonType) {
 function cleanData(values) {
   const header = values[0];
   const rows = values.slice(1);
+  const contextCols = Object.keys(CONTEXT_VIEW_CONFIG).flatMap(key => CONTEXT_VIEW_CONFIG[key].features);
 
   // Column indices
   const idx = {};
@@ -134,7 +186,9 @@ function cleanData(values) {
       'Acceptability_AI_Shape', 'Acceptability_AI_Lighting', 'Acceptability_AI_BgItems',
       'Acceptability_AI_BgImage', 'Acceptability_AI_Position', 'Acceptability_AI_Color'
     ];
-    if (acceptCols.every(col => !row[idx[col]])) return false;
+    const hasAcceptabilityResponse = acceptCols.some(col => row[idx[col]]);
+    const hasContextResponse = contextCols.some(col => row[idx[col]]);
+    if (!hasAcceptabilityResponse && !hasContextResponse) return false;
     // Remove specific ResponseIds
     const removeIds = [
       'R_3rvFplrp4hr3iBH'
@@ -165,6 +219,73 @@ function cleanData(values) {
   });
 
   return mapped;
+}
+
+function getContextViewConfig(view) {
+  return CONTEXT_VIEW_CONFIG[view] || CONTEXT_VIEW_CONFIG.importance;
+}
+
+function hasContextResponseForFeature(row, feature, valueMap) {
+  const score = valueMap[row[feature]];
+  return isValidScore(score);
+}
+
+function hasAnyContextResponse(row, viewConfig) {
+  return viewConfig.features.some(feature => hasContextResponseForFeature(row, feature, viewConfig.valueMap));
+}
+
+function aggregateContextBoxPlot(data, comparisonType, view) {
+  const viewConfig = getContextViewConfig(view);
+  const output = {
+    features: viewConfig.features,
+    groups: [],
+    data: {},
+    groupCounts: {}
+  };
+
+  const groupsAndCounts = getContextGroupsAndCounts(data, comparisonType, viewConfig);
+  output.groups = groupsAndCounts.groups;
+  output.groupCounts = groupsAndCounts.groupCounts;
+
+  viewConfig.features.forEach(feature => {
+    output.data[feature] = {};
+    output.groups.forEach(group => {
+      output.data[feature][group] = collectContextScores(data, comparisonType, group, feature, viewConfig);
+    });
+  });
+
+  return output;
+}
+
+function aggregateContextSwarmPlot(data, comparisonType, view) {
+  return aggregateContextBoxPlot(data, comparisonType, view);
+}
+
+function aggregateContextLineChart(data, comparisonType, view) {
+  const viewConfig = getContextViewConfig(view);
+  const output = {
+    features: viewConfig.features,
+    groups: [],
+    means: {},
+    stds: {},
+    groupCounts: {}
+  };
+
+  const groupsAndCounts = getContextGroupsAndCounts(data, comparisonType, viewConfig);
+  output.groups = groupsAndCounts.groups;
+  output.groupCounts = groupsAndCounts.groupCounts;
+
+  output.groups.forEach(group => {
+    output.means[group] = {};
+    output.stds[group] = {};
+    viewConfig.features.forEach(feature => {
+      const scores = collectContextScores(data, comparisonType, group, feature, viewConfig);
+      output.means[group][feature] = calculateMean(scores);
+      output.stds[group][feature] = calculateStdDev(scores);
+    });
+  });
+
+  return output;
 }
 
 // --- Aggregation for Swarm Plot ---
@@ -453,6 +574,45 @@ function getSummaryResponseCount(data) {
   }).length;
 }
 
+function getContextSummaryResponseCount(data, viewConfig) {
+  return data.filter(row => hasAnyContextResponse(row, viewConfig)).length;
+}
+
+function getContextGroupsAndCounts(data, comparisonType, viewConfig) {
+  if (comparisonType === 'summary') {
+    return {
+      groups: ['Summary'],
+      groupCounts: {
+        Summary: getContextSummaryResponseCount(data, viewConfig)
+      }
+    };
+  }
+
+  const comparisonColumn = getComparisonColumn(comparisonType);
+  let groups = [];
+  if (comparisonColumn === 'Domains') {
+    groups = Array.from(new Set(data
+      .filter(row => hasAnyContextResponse(row, viewConfig))
+      .flatMap(d => normalizeDomains(d['Domains']))));
+  } else {
+    groups = Array.from(new Set(data
+      .filter(row => hasAnyContextResponse(row, viewConfig))
+      .map(d => normalizeGroupValue(d[comparisonColumn]))
+      .filter(v => v !== null)));
+  }
+
+  const groupCounts = {};
+  groups.forEach(group => {
+    if (comparisonColumn === 'Domains') {
+      groupCounts[group] = data.filter(d => hasAnyContextResponse(d, viewConfig) && normalizeDomains(d['Domains']).includes(group)).length;
+    } else {
+      groupCounts[group] = data.filter(d => hasAnyContextResponse(d, viewConfig) && normalizeGroupValue(d[comparisonColumn]) === group).length;
+    }
+  });
+
+  return { groups, groupCounts };
+}
+
 function getGroupsAndCounts(data, comparisonType) {
   if (comparisonType === 'summary') {
     return {
@@ -556,4 +716,19 @@ function collectScores(data, comparisonType, group, feature) {
   }
 
   return { human: humanScores, ai: aiScores };
+}
+
+function collectContextScores(data, comparisonType, group, feature, viewConfig) {
+  const scores = [];
+
+  data.forEach(row => {
+    if (!matchesGroup(row, comparisonType, group)) return;
+
+    const value = viewConfig.valueMap[row[feature]];
+    if (isValidScore(value)) {
+      scores.push(value);
+    }
+  });
+
+  return scores;
 }

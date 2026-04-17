@@ -93,6 +93,8 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         categoryOrders = {},
         xaxisTitle = '',
         yaxisTitle = '',
+        xTickAngle = 30,
+        responseScale = 'acceptability',
         legendOrder = null,
         traceNameMap = null,
         showLegend = true
@@ -106,7 +108,7 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
     });
     const xVals = [...new Set(data.map(row => row[x]))];
     const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(xVals, window.FEATURE_LABELS || {});
-    const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
+    const { tickvals: yTickVals, ticktext: yTickText, range: yRange, title: defaultYTitle } = window.getLikertYAxisTicks(responseScale);
 
     let sortedTraces = traces;
     if (legendOrder && legendOrder.length > 0) {
@@ -128,17 +130,18 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         title,
         xaxis: {
             title: xaxisTitle,
-            tickangle: 30,
+            tickangle: xTickAngle,
             tickvals: xTickVals,
             ticktext: xTickText,
             categoryorder: 'array',
             categoryarray: categoryOrders[x] || xVals
         },
         yaxis: {
-            title: yaxisTitle,
+            title: yaxisTitle || defaultYTitle,
             tickmode: 'array',
             tickvals: yTickVals,
-            ticktext: yTickText
+            ticktext: yTickText,
+            range: yRange
         },
         legendOptions: legendOrder ? { traceorder: 'normal' } : {},
         showLegend,
@@ -166,6 +169,10 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const sharedLayout = options.sharedLayout || null;
     const traceNameMap = options.traceNameMap || {};
     const groupOrder = options.groupOrder || legendOrder;
+    const xaxisTitle = options.xaxisTitle || 'Type of Alteration';
+    const yaxisTitle = options.yaxisTitle || '';
+    const xTickAngle = options.xTickAngle ?? 30;
+    const responseScale = options.responseScale || 'acceptability';
     featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
     const pairedData = options.pairedData || [];
 
@@ -335,16 +342,19 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     } else {
         const xTickVals = featureOrder;
         const xTickText = featureOrder.map(f => getFeatureLabel(f));
-        const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
+        const { tickvals: yTickVals, ticktext: yTickText, range: yRange, title: defaultYTitle } = window.getLikertYAxisTicks(responseScale);
         layout = buildDefaultPlotLayout({
             title,
-            xaxis: buildXAxisConfig('Type of Alteration', xTickVals, xTickText, 30, 'category'),
-            yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
+            xaxis: buildXAxisConfig(xaxisTitle, xTickVals, xTickText, xTickAngle, 'category'),
+            yaxis: buildYAxisConfig(yaxisTitle || defaultYTitle, yTickVals, yTickText),
             legendOptions: { title: { text: legendTitle } },
             showLegend,
             height: 500,
             margin: { r: 180 }
         });
+        if (yRange) {
+            layout.yaxis.range = yRange;
+        }
     }
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
@@ -523,11 +533,13 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         categoryOrders = {},
         xaxisTitle = '',
         yaxisTitle = '',
+        responseScale = 'acceptability',
         traceNameMap = {},
         legendOrder = null,
         jitterAmplitude = 0.54,
         markerSize = 7,
         markerOpacity = 0.65,
+        xTickAngle = 30,
         showLegend = true
     } = options;
 
@@ -587,15 +599,18 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
     });
 
     const xTickText = featureOrder.map(f => getFeatureLabel(f));
-    const { tickvals: yTickVals, ticktext: yTickText } = window.getLikertYAxisTicks();
+    const { tickvals: yTickVals, ticktext: yTickText, range: yRange, title: defaultYTitle } = window.getLikertYAxisTicks(responseScale);
     const layout = buildDefaultPlotLayout({
         title,
-        xaxis: buildXAxisConfig(xaxisTitle, featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
-        yaxis: buildYAxisConfig(yaxisTitle, yTickVals, yTickText, true),
+        xaxis: buildXAxisConfig(xaxisTitle, featureOrder.map((_, i) => i), xTickText, xTickAngle, 'linear', [-0.5, featureOrder.length - 0.5]),
+        yaxis: buildYAxisConfig(yaxisTitle || defaultYTitle, yTickVals, yTickText, true),
         legendOptions: { traceorder: legendTraceOrder },
         showLegend,
         margin: { r: 180 }
     });
+    if (yRange) {
+        layout.yaxis.range = yRange;
+    }
     const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;

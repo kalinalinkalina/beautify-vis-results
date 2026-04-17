@@ -25,14 +25,28 @@ function getAxisTicks(values, labelMap) {
     };
 }
 
-/**
- * Returns Likert scale y-axis ticks and labels.
- * @returns {{tickvals: Array<number>, ticktext: Array<string>}}
- */
-function getLikertYAxisTicks() {
-    return {
+function getResponseScale(scaleKey = 'acceptability') {
+    const scales = (typeof window !== 'undefined' && window.RESPONSE_SCALES) ? window.RESPONSE_SCALES : {};
+    return scales[scaleKey] || scales.acceptability || {
+        title: 'Acceptability',
         tickvals: [0, 1, 2, 3, 4, 5],
-        ticktext: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"]
+        ticktext: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
+        range: [-0.5, 5.5]
+    };
+}
+
+/**
+ * Returns y-axis ticks and labels for the requested response scale.
+ * @param {string} scaleKey
+ * @returns {{tickvals: Array<number>, ticktext: Array<string>, range: Array<number>|null, title: string}}
+ */
+function getLikertYAxisTicks(scaleKey = 'acceptability') {
+    const scale = getResponseScale(scaleKey);
+    return {
+        tickvals: scale.tickvals || [],
+        ticktext: scale.ticktext || [],
+        range: scale.range || null,
+        title: scale.title || ''
     };
 }
 
@@ -91,6 +105,7 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
 
 // Export for use by chart builder modules
 if (typeof window !== 'undefined') {
+    window.getResponseScale = getResponseScale;
     window.filterValidTraces = filterValidTraces;
     window.getAxisTicks = getAxisTicks;
     window.getLikertYAxisTicks = getLikertYAxisTicks;

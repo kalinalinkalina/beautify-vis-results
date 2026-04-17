@@ -47,13 +47,32 @@ document.addEventListener('DOMContentLoaded', function() {
         return {
             chartType: document.getElementById('chart-type').value,
             comparisonType: document.getElementById('comparison-type').value,
-            sortBy: document.getElementById('sort-by').value
+            sortBy: document.getElementById('sort-by').value,
+            contextView: document.getElementById('context-view') ? document.getElementById('context-view').value : 'use_cases'
         };
     }
 
-    function validateBackendDataShape(data, chartType) {
+    function getContextViewConfig(view) {
+        return (window.CONTEXT_VIEW_CONFIG && window.CONTEXT_VIEW_CONFIG[view]) || {
+            label: 'Use Cases',
+            features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
+            responseScale: 'use_case_acceptability',
+            plotTitlePrefix: 'Use Case',
+            combineFeatures: true,
+            combinedPlotTitle: 'How acceptable would you find using AI-enhanced images in the following contexts?'
+        };
+    }
+
+    function isContextsTab() {
+        return activeTab === 'contexts';
+    }
+
+    function validateBackendDataShape(data, chartType, tabName = activeTab) {
         if (!data || typeof data !== 'object') {
             throw new Error('Backend response is not a valid object.');
+        }
+        if (data.error) {
+            throw new Error(data.error);
         }
         if (!Array.isArray(data.groups)) {
             throw new Error('Backend response missing required array "groups".');
@@ -73,7 +92,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        const optionalObjects = ['data', 'dataHuman', 'dataAI', 'means', 'meansHuman', 'meansAI', 'stdsHuman', 'stdsAI', 'pairedData'];
+        const optionalObjects = ['data', 'dataHuman', 'dataAI', 'means', 'meansHuman', 'meansAI', 'stds', 'stdsHuman', 'stdsAI', 'pairedData'];
         optionalObjects.forEach(name => {
             if (data[name] !== undefined && (typeof data[name] !== 'object' || data[name] === null)) {
                 throw new Error(`Backend response property "${name}" must be an object or array if present.`);
@@ -86,17 +105,26 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         if (chartType === 'line') {
-            if (typeof data.meansHuman !== 'object' || data.meansHuman === null) {
-                throw new Error('Line chart response must include "meansHuman".');
-            }
-            if (typeof data.meansAI !== 'object' || data.meansAI === null) {
-                throw new Error('Line chart response must include "meansAI".');
-            }
-            if (typeof data.stdsHuman !== 'object' || data.stdsHuman === null) {
-                throw new Error('Line chart response must include "stdsHuman".');
-            }
-            if (typeof data.stdsAI !== 'object' || data.stdsAI === null) {
-                throw new Error('Line chart response must include "stdsAI".');
+            if (tabName === 'contexts') {
+                if (typeof data.means !== 'object' || data.means === null) {
+                    throw new Error('Context line chart response must include "means".');
+                }
+                if (typeof data.stds !== 'object' || data.stds === null) {
+                    throw new Error('Context line chart response must include "stds".');
+                }
+            } else {
+                if (typeof data.meansHuman !== 'object' || data.meansHuman === null) {
+                    throw new Error('Line chart response must include "meansHuman".');
+                }
+                if (typeof data.meansAI !== 'object' || data.meansAI === null) {
+                    throw new Error('Line chart response must include "meansAI".');
+                }
+                if (typeof data.stdsHuman !== 'object' || data.stdsHuman === null) {
+                    throw new Error('Line chart response must include "stdsHuman".');
+                }
+                if (typeof data.stdsAI !== 'object' || data.stdsAI === null) {
+                    throw new Error('Line chart response must include "stdsAI".');
+                }
             }
         }
         if (chartType === 'slope') {
@@ -111,11 +139,17 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         if (chartType === 'swarm') {
-            if (typeof data.dataHuman !== 'object' || data.dataHuman === null) {
-                throw new Error('Swarm plot response must include "dataHuman".');
-            }
-            if (typeof data.dataAI !== 'object' || data.dataAI === null) {
-                throw new Error('Swarm plot response must include "dataAI".');
+            if (tabName === 'contexts') {
+                if (typeof data.data !== 'object' || data.data === null) {
+                    throw new Error('Context swarm plot response must include "data".');
+                }
+            } else {
+                if (typeof data.dataHuman !== 'object' || data.dataHuman === null) {
+                    throw new Error('Swarm plot response must include "dataHuman".');
+                }
+                if (typeof data.dataAI !== 'object' || data.dataAI === null) {
+                    throw new Error('Swarm plot response must include "dataAI".');
+                }
             }
         }
 
@@ -192,6 +226,47 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         // Default: human_mean
         return getFeatureSortOrder('human_mean', meltedHuman, meltedAI);
+    }
+
+    function getContextFeatureSortOrder(sortBy, rows, fallbackFeatures) {
+        const features = Array.isArray(fallbackFeatures) ? fallbackFeatures.slice() : [];
+        if (!Array.isArray(rows) || rows.length === 0) {
+            return features;
+        }
+
+        const grouped = rows.reduce((acc, row) => {
+            const key = row.Feature_Name;
+            acc[key] = acc[key] || [];
+            acc[key].push(row.Numerical_Score);
+            return acc;
+        }, {});
+
+        function median(values) {
+            const sorted = values.slice().sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        }
+
+        const metric = sortBy === 'human_median' ? 'median' : 'mean';
+        const ordered = Object.keys(grouped).sort((a, b) => {
+            const valuesA = grouped[a];
+            const valuesB = grouped[b];
+            const scoreA = metric === 'median'
+                ? median(valuesA)
+                : valuesA.reduce((sum, value) => sum + value, 0) / valuesA.length;
+            const scoreB = metric === 'median'
+                ? median(valuesB)
+                : valuesB.reduce((sum, value) => sum + value, 0) / valuesB.length;
+            return scoreB - scoreA;
+        });
+
+        features.forEach(feature => {
+            if (!ordered.includes(feature)) {
+                ordered.push(feature);
+            }
+        });
+
+        return ordered;
     }
 
     // --- Utility: get group display labels, colors, and order ---
@@ -291,8 +366,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Utility: resize plots after rendering so visible charts match their container width ---
     function resizeVisiblePlots() {
-        ['human-plot', 'ai-plot'].forEach(id => {
+        const plotIds = ['human-plot', 'ai-plot'];
+        plotIds.forEach(id => {
             const plotEl = document.getElementById(id);
+            if (plotEl && plotEl.offsetWidth > 0) {
+                try {
+                    Plotly.Plots.resize(plotEl);
+                } catch (err) {
+                    // ignore if plot is not initialized yet
+                }
+            }
+        });
+        document.querySelectorAll('#contexts-plots-container .context-plot').forEach(plotEl => {
             if (plotEl && plotEl.offsetWidth > 0) {
                 try {
                     Plotly.Plots.resize(plotEl);
@@ -766,6 +851,369 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('ai-plot').style.display = 'block';
     }
 
+    function buildContextRows(backendData) {
+        const rows = [];
+        backendData.features.forEach(feature => {
+            backendData.groups.forEach(group => {
+                const scores = (backendData.data[feature] && backendData.data[feature][group]) ? backendData.data[feature][group] : [];
+                scores.forEach(score => {
+                    rows.push({
+                        Feature_Name: feature,
+                        Numerical_Score: score,
+                        Group: group
+                    });
+                });
+            });
+        });
+        return rows;
+    }
+
+    function renderContextError(message) {
+        const container = document.getElementById('contexts-plots-container');
+        if (!container) return;
+        container.innerHTML = `<div style="color:red;text-align:center;padding:2em;">${message}</div>`;
+    }
+
+    function getContextPlotTitle(feature, viewConfig) {
+        const featureLabel = getFeatureLabel(feature);
+        if (featureLabel === feature) {
+            return feature;
+        }
+        return `${feature}: ${featureLabel}`;
+    }
+
+    function shouldCombineContextFeatures(contextView) {
+        const viewConfig = getContextViewConfig(contextView);
+        return viewConfig.combineFeatures === true;
+    }
+
+    function getContextViewsToRender(contextView) {
+        if (contextView === 'importance') {
+            return ['comfort', 'importance'];
+        }
+        return [contextView];
+    }
+
+    function getCombinedContextPlotTitle(viewConfig) {
+        if (viewConfig.combinedPlotTitle) {
+            return viewConfig.combinedPlotTitle;
+        }
+        return viewConfig.label || 'Contexts';
+    }
+
+    function getContextRenderTarget(renderOptions = {}) {
+        const container = renderOptions.container || document.getElementById('contexts-plots-container');
+        const plotIdPrefix = renderOptions.plotIdPrefix || 'context-plot';
+        return { container, plotIdPrefix };
+    }
+
+    function renderContextBoxPlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
+        const viewConfig = getContextViewConfig(contextView);
+        const comparisonConfig = getComparisonConfig(comparisonType);
+        const { container, plotIdPrefix } = getContextRenderTarget(renderOptions);
+        if (!container) return;
+
+        const rows = buildContextRows(backendData);
+        const featureOrder = getContextFeatureSortOrder(sortBy, rows, backendData.features);
+        const isSummary = comparisonType === 'summary';
+        const groupPresentation = isSummary
+            ? {
+                groupOrder: backendData.groups.slice(),
+                colorMap: { Summary: (comparisonConfig.colorMap && comparisonConfig.colorMap.Summary) || '#444' },
+                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` }
+            }
+            : buildGroupPresentation(comparisonType, backendData);
+        const legendOrder = groupPresentation.groupOrder.map(group => groupPresentation.traceNameMap[group] || group);
+
+        if (shouldCombineContextFeatures(contextView)) {
+            container.innerHTML = `
+                <div style="width:90vw;max-width:1200px;">
+                    <div id="${plotIdPrefix}-combined" class="context-plot" style="width:100%;"></div>
+                </div>
+            `;
+
+            makeBoxPlot(
+                rows,
+                'Feature_Name',
+                'Numerical_Score',
+                'Group',
+                {
+                    title: getCombinedContextPlotTitle(viewConfig),
+                    colorMap: groupPresentation.colorMap,
+                    categoryOrders: { Feature_Name: featureOrder, Group: groupPresentation.groupOrder },
+                    xaxisTitle: '',
+                    yaxisTitle: '',
+                    xTickAngle: 15,
+                    responseScale: viewConfig.responseScale,
+                    legendOrder,
+                    traceNameMap: groupPresentation.traceNameMap,
+                    showLegend: !isSummary
+                },
+                `${plotIdPrefix}-combined`
+            );
+            return;
+        }
+
+        container.innerHTML = featureOrder.map(feature => `
+            <div style="width:90vw;max-width:1200px;">
+                <div id="${plotIdPrefix}-${feature}" class="context-plot" style="width:100%;"></div>
+            </div>
+        `).join('');
+
+        featureOrder.forEach((feature, index) => {
+            const featureRows = rows
+                .filter(row => row.Feature_Name === feature)
+                .map(row => Object.assign({}, row));
+            makeBoxPlot(
+                featureRows,
+                'Feature_Name',
+                'Numerical_Score',
+                'Group',
+                {
+                    title: getContextPlotTitle(feature, viewConfig),
+                    colorMap: groupPresentation.colorMap,
+                    categoryOrders: { Feature_Name: [feature], Group: groupPresentation.groupOrder },
+                    xaxisTitle: '',
+                    yaxisTitle: '',
+                    xTickAngle: 15,
+                    responseScale: viewConfig.responseScale,
+                    legendOrder,
+                    traceNameMap: groupPresentation.traceNameMap,
+                    showLegend: !isSummary && index === 0
+                },
+                `${plotIdPrefix}-${feature}`
+            );
+        });
+    }
+
+    function renderContextLinePlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
+        const viewConfig = getContextViewConfig(contextView);
+        const comparisonConfig = getComparisonConfig(comparisonType);
+        const { container, plotIdPrefix } = getContextRenderTarget(renderOptions);
+        if (!container) return;
+
+        const rows = backendData.features.flatMap(feature => (
+            backendData.groups.flatMap(group => {
+                const score = backendData.means[group] ? backendData.means[group][feature] : null;
+                return score === null || score === undefined ? [] : [{
+                    Feature_Name: feature,
+                    Numerical_Score: score,
+                    Group: group
+                }];
+            })
+        ));
+        const featureOrder = getContextFeatureSortOrder(sortBy, rows, backendData.features);
+        const isSummary = comparisonType === 'summary';
+        const groupPresentation = isSummary
+            ? {
+                groupOrder: backendData.groups.slice(),
+                colorMap: { Summary: (comparisonConfig.colorMap && comparisonConfig.colorMap.Summary) || '#444' },
+                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` }
+            }
+            : buildGroupPresentation(comparisonType, backendData);
+        const legendOrder = groupPresentation.groupOrder.map(group => groupPresentation.traceNameMap[group] || group);
+
+        if (shouldCombineContextFeatures(contextView)) {
+            container.innerHTML = `
+                <div style="width:90vw;max-width:1200px;">
+                    <div id="${plotIdPrefix}-combined" class="context-plot" style="width:100%;"></div>
+                </div>
+            `;
+
+            const means = {};
+            const stds = {};
+            groupPresentation.groupOrder.forEach(group => {
+                means[group] = backendData.means[group] || {};
+                stds[group] = backendData.stds[group] || {};
+            });
+
+            makeLineChart(
+                means,
+                featureOrder,
+                groupPresentation.colorMap,
+                legendOrder,
+                {
+                    title: getCombinedContextPlotTitle(viewConfig),
+                    legendTitle: isSummary ? 'Summary' : 'Group',
+                    traceNameMap: groupPresentation.traceNameMap,
+                    groupOrder: groupPresentation.groupOrder,
+                    stdDevDict: stds,
+                    xaxisTitle: '',
+                    yaxisTitle: '',
+                    xTickAngle: 15,
+                    responseScale: viewConfig.responseScale,
+                    showLegend: !isSummary
+                },
+                `${plotIdPrefix}-combined`
+            );
+            return;
+        }
+
+        container.innerHTML = featureOrder.map(feature => `
+            <div style="width:90vw;max-width:1200px;">
+                <div id="${plotIdPrefix}-${feature}" class="context-plot" style="width:100%;"></div>
+            </div>
+        `).join('');
+
+        featureOrder.forEach((feature, index) => {
+            const means = {};
+            const stds = {};
+            groupPresentation.groupOrder.forEach(group => {
+                means[group] = {};
+                means[group][feature] = backendData.means[group] ? backendData.means[group][feature] : null;
+                stds[group] = {};
+                stds[group][feature] = backendData.stds[group] ? backendData.stds[group][feature] : null;
+            });
+
+            makeLineChart(
+                means,
+                [feature],
+                groupPresentation.colorMap,
+                legendOrder,
+                {
+                    title: getContextPlotTitle(feature, viewConfig),
+                    legendTitle: isSummary ? 'Summary' : 'Group',
+                    traceNameMap: groupPresentation.traceNameMap,
+                    groupOrder: groupPresentation.groupOrder,
+                    stdDevDict: stds,
+                    xaxisTitle: '',
+                    yaxisTitle: '',
+                    xTickAngle: 15,
+                    responseScale: viewConfig.responseScale,
+                    showLegend: !isSummary && index === 0
+                },
+                `${plotIdPrefix}-${feature}`
+            );
+        });
+    }
+
+    function renderContextSwarmPlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
+        const viewConfig = getContextViewConfig(contextView);
+        const comparisonConfig = getComparisonConfig(comparisonType);
+        const { container, plotIdPrefix } = getContextRenderTarget(renderOptions);
+        if (!container) return;
+
+        const rows = buildContextRows(backendData);
+        const featureOrder = getContextFeatureSortOrder(sortBy, rows, backendData.features);
+        const isSummary = comparisonType === 'summary';
+        const groupPresentation = isSummary
+            ? {
+                groupOrder: backendData.groups.slice(),
+                colorMap: { Summary: (comparisonConfig.colorMap && comparisonConfig.colorMap.Summary) || '#444' },
+                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` }
+            }
+            : buildGroupPresentation(comparisonType, backendData);
+        const legendOrder = groupPresentation.groupOrder.map(group => groupPresentation.traceNameMap[group] || group);
+
+        if (shouldCombineContextFeatures(contextView)) {
+            container.innerHTML = `
+                <div style="width:90vw;max-width:1200px;">
+                    <div id="${plotIdPrefix}-combined" class="context-plot" style="width:100%;"></div>
+                </div>
+            `;
+
+            makeSwarmPlot(
+                rows,
+                'Feature_Name',
+                'Numerical_Score',
+                'Group',
+                {
+                    title: getCombinedContextPlotTitle(viewConfig),
+                    colorMap: groupPresentation.colorMap,
+                    categoryOrders: { Feature_Name: featureOrder, Group: groupPresentation.groupOrder },
+                    xaxisTitle: '',
+                    yaxisTitle: '',
+                    xTickAngle: 15,
+                    responseScale: viewConfig.responseScale,
+                    traceNameMap: groupPresentation.traceNameMap,
+                    legendOrder,
+                    showLegend: !isSummary
+                },
+                `${plotIdPrefix}-combined`
+            );
+            return;
+        }
+
+        container.innerHTML = featureOrder.map(feature => `
+            <div style="width:90vw;max-width:1200px;">
+                <div id="${plotIdPrefix}-${feature}" class="context-plot" style="width:100%;"></div>
+            </div>
+        `).join('');
+
+        featureOrder.forEach((feature, index) => {
+            const featureRows = rows
+                .filter(row => row.Feature_Name === feature)
+                .map(row => Object.assign({}, row));
+            makeSwarmPlot(
+                featureRows,
+                'Feature_Name',
+                'Numerical_Score',
+                'Group',
+                {
+                    title: getContextPlotTitle(feature, viewConfig),
+                    colorMap: groupPresentation.colorMap,
+                    categoryOrders: { Feature_Name: [feature], Group: groupPresentation.groupOrder },
+                    xaxisTitle: '',
+                    yaxisTitle: '',
+                    xTickAngle: 15,
+                    responseScale: viewConfig.responseScale,
+                    traceNameMap: groupPresentation.traceNameMap,
+                    legendOrder,
+                    showLegend: !isSummary && index === 0
+                },
+                `${plotIdPrefix}-${feature}`
+            );
+        });
+    }
+
+    function renderContextPlotsForView(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
+        if (!backendData) {
+            renderContextError('No data loaded from backend.');
+            return;
+        }
+
+        if (comparisonType === 'human_ai') {
+            renderContextError('The Human vs AI comparison is not available for contexts.');
+            return;
+        }
+
+        const chartType = document.getElementById('chart-type').value;
+        if (chartType === 'box') {
+            renderContextBoxPlots(backendData, comparisonType, sortBy, contextView, renderOptions);
+        } else if (chartType === 'line') {
+            renderContextLinePlots(backendData, comparisonType, sortBy, contextView, renderOptions);
+        } else if (chartType === 'swarm') {
+            renderContextSwarmPlots(backendData, comparisonType, sortBy, contextView, renderOptions);
+        } else {
+            renderContextError('This chart type is not available for contexts.');
+        }
+    }
+
+    function renderContextPlots(backendData, comparisonType, sortBy, contextView) {
+        const container = document.getElementById('contexts-plots-container');
+        if (!container) return;
+
+        const viewsToRender = getContextViewsToRender(contextView);
+        if (viewsToRender.length === 1) {
+            const singleViewData = backendData && backendData.contextViews ? backendData.contextViews[viewsToRender[0]] : backendData;
+            renderContextPlotsForView(singleViewData, comparisonType, sortBy, viewsToRender[0]);
+            return;
+        }
+
+        container.innerHTML = viewsToRender.map(view => `
+            <div id="context-section-${view}" class="context-section" style="width:100%;display:flex;flex-direction:column;align-items:center;"></div>
+        `).join('');
+
+        viewsToRender.forEach(view => {
+            const section = document.getElementById(`context-section-${view}`);
+            const viewData = backendData && backendData.contextViews ? backendData.contextViews[view] : null;
+            renderContextPlotsForView(viewData, comparisonType, sortBy, view, {
+                container: section,
+                plotIdPrefix: `context-plot-${view}`
+            });
+        });
+    }
+
     const TAB_RENDERERS = {
         alterations: renderAlterationsTab,
         contexts: renderContextsTab
@@ -776,27 +1224,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderContextsTab() {
-        const container = document.getElementById('tab-contexts');
-        if (!container) return;
-        container.innerHTML = `
-            <div class="context-view-controls">
-                <label for="context-view">View</label>
-                <select id="context-view">
-                    <option value="use_cases">Use Cases</option>
-                    <option value="comfort">Comfort</option>
-                    <option value="importance">Importance</option>
-                </select>
-            </div>
-            <div style="padding:40px;text-align:center;color:#666;font-size:1rem;">Not implemented yet.</div>
-        `;
+        updatePlots();
     }
 
-    function updateComparisonAvailability(tabName = activeTab) {
+    function updateControlAvailability(tabName = activeTab) {
         const comparisonSelect = document.getElementById('comparison-type');
-        if (!comparisonSelect) return;
+        const chartTypeSelect = document.getElementById('chart-type');
+        const sortBySelect = document.getElementById('sort-by');
+        if (!comparisonSelect || !chartTypeSelect || !sortBySelect) return;
+
         const humanAIOption = comparisonSelect.querySelector('option[value="human_ai"]');
         const summaryOption = comparisonSelect.querySelector('option[value="summary"]');
-        const chartTypeSelect = document.getElementById('chart-type');
+        const slopeOption = chartTypeSelect.querySelector('option[value="slope"]');
         const chartType = chartTypeSelect ? chartTypeSelect.value : null;
 
         const disableHumanAI = tabName === 'contexts';
@@ -819,6 +1258,44 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
+        const disableSlope = tabName === 'contexts';
+        if (slopeOption) {
+            slopeOption.disabled = disableSlope;
+            if (disableSlope) {
+                slopeOption.setAttribute('aria-disabled', 'true');
+            } else {
+                slopeOption.removeAttribute('aria-disabled');
+            }
+        }
+
+        const sortOptionUpdates = [
+            { value: 'human_mean', disabled: false, label: tabName === 'contexts' ? 'Mean' : 'Human Mean' },
+            { value: 'ai_mean', disabled: tabName === 'contexts', label: 'AI Mean' },
+            { value: 'difference', disabled: tabName === 'contexts', label: 'Difference in Mean (Human - AI)' },
+            { value: 'human_median', disabled: false, label: tabName === 'contexts' ? 'Median' : 'Human Median' },
+            { value: 'ai_median', disabled: tabName === 'contexts', label: 'AI Median' },
+            { value: 'difference_median', disabled: tabName === 'contexts', label: 'Difference in Median (Human - AI)' }
+        ];
+        sortOptionUpdates.forEach(update => {
+            const option = sortBySelect.querySelector(`option[value="${update.value}"]`);
+            if (!option) return;
+            option.disabled = update.disabled;
+            option.textContent = update.label;
+            if (update.disabled) {
+                option.setAttribute('aria-disabled', 'true');
+            } else {
+                option.removeAttribute('aria-disabled');
+            }
+        });
+
+        const selectedChartTypeOption = chartTypeSelect.querySelector(`option[value="${chartTypeSelect.value}"]`);
+        if (selectedChartTypeOption && selectedChartTypeOption.disabled) {
+            const firstEnabledChartType = chartTypeSelect.querySelector('option:not([disabled])');
+            if (firstEnabledChartType) {
+                chartTypeSelect.value = firstEnabledChartType.value;
+            }
+        }
+
         const selectedOption = comparisonSelect.querySelector(`option[value="${comparisonSelect.value}"]`);
         if (selectedOption && selectedOption.disabled) {
             const firstEnabledOption = comparisonSelect.querySelector('option:not([disabled])');
@@ -826,19 +1303,34 @@ document.addEventListener('DOMContentLoaded', function() {
                 comparisonSelect.value = firstEnabledOption.value;
             }
         }
+
+        const selectedSortOption = sortBySelect.querySelector(`option[value="${sortBySelect.value}"]`);
+        if (selectedSortOption && selectedSortOption.disabled) {
+            sortBySelect.value = 'human_mean';
+        }
     }
 
     function loadTabData(tabName) {
-        if (tabName === 'alterations') {
+        if (tabName === 'alterations' || tabName === 'contexts') {
             return refreshBackendData();
         }
-        // Future: replace with context-specific data loading logic when Contexts data becomes available
         return Promise.resolve();
     }
 
     // --- Main plot update logic ---
     function updatePlots() {
-        const { chartType, comparisonType, sortBy } = getSelections();
+        const { chartType, comparisonType, sortBy, contextView } = getSelections();
+
+        if (isContextsTab()) {
+            try {
+                renderContextPlots(backendData, comparisonType, sortBy, contextView);
+                resizeVisiblePlots();
+            } catch (err) {
+                renderContextError(`Error updating plots: ${err.message}`);
+            }
+            return;
+        }
+
         let showHumanPlot = true;
         let showAIPlot = false;
         if (chartType === 'box' || chartType === 'line' || chartType === 'swarm') {
@@ -877,17 +1369,39 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Fetch aggregated data from backend ---
     async function refreshBackendData() {
-        const { chartType, comparisonType } = getSelections();
+        const { chartType, comparisonType, contextView } = getSelections();
         showSpinner();
         try {
-            const data = await fetchAggregatedData(chartType, comparisonType);
-            validateBackendDataShape(data, chartType);
-            backendData = data;
+            if (isContextsTab()) {
+                const viewsToRender = getContextViewsToRender(contextView);
+                const viewEntries = await Promise.all(viewsToRender.map(async view => {
+                    const data = await fetchAggregatedData(chartType, comparisonType, {
+                        tab: activeTab,
+                        view
+                    });
+                    validateBackendDataShape(data, chartType, activeTab);
+                    return [view, data];
+                }));
+                backendData = {
+                    contextViews: Object.fromEntries(viewEntries)
+                };
+            } else {
+                const data = await fetchAggregatedData(chartType, comparisonType, {
+                    tab: activeTab,
+                    view: contextView
+                });
+                validateBackendDataShape(data, chartType, activeTab);
+                backendData = data;
+            }
             updatePlots();
         } catch (err) {
-            document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">Error fetching data: ${err.message}</div>`;
-            document.getElementById('human-plot').style.display = 'block';
-            document.getElementById('ai-plot').style.display = 'none';
+            if (isContextsTab()) {
+                renderContextError(`Error fetching data: ${err.message}`);
+            } else {
+                document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">Error fetching data: ${err.message}</div>`;
+                document.getElementById('human-plot').style.display = 'block';
+                document.getElementById('ai-plot').style.display = 'none';
+            }
             backendData = null;
         } finally {
             hideSpinner();
@@ -905,7 +1419,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Only fetch data when chart-type or comparison-type changes
     document.getElementById('chart-type').addEventListener('change', function() {
-        updateComparisonAvailability();
+        updateControlAvailability();
         refreshBackendData();
     });
     document.getElementById('comparison-type').addEventListener('change', refreshBackendData);
@@ -913,6 +1427,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('sort-by').addEventListener('change', function() {
         updatePlots();
     });
+    document.getElementById('context-view').addEventListener('change', refreshBackendData);
 
     // Initial tab state and load
     switchTab('alterations');
@@ -932,7 +1447,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         activeTab = tabName;
-        updateComparisonAvailability(tabName);
+        updateControlAvailability(tabName);
         loadTabData(tabName)
             .then(() => {
                 const renderer = TAB_RENDERERS[tabName];
