@@ -61,7 +61,10 @@ function loadJsonp(url) {
 async function fetchAggregatedData(chartType, comparisonType, options = {}) {
     const tab = options.tab || 'alterations';
     const view = options.view || 'importance';
-    const url = `${BACKEND_API_URL}?chartType=${encodeURIComponent(chartType)}&comparisonType=${encodeURIComponent(comparisonType)}&tab=${encodeURIComponent(tab)}&view=${encodeURIComponent(view)}`;
+    // Stacked bars reuse the same aggregated score payload as box plots, so this
+    // remains compatible with the currently deployed Apps Script until it is redeployed.
+    const backendChartType = chartType === 'stacked' ? 'box' : chartType;
+    const url = `${BACKEND_API_URL}?chartType=${encodeURIComponent(backendChartType)}&comparisonType=${encodeURIComponent(comparisonType)}&tab=${encodeURIComponent(tab)}&view=${encodeURIComponent(view)}`;
     const isLocal = typeof window !== 'undefined' && (
         window.location.hostname === 'localhost' ||
         window.location.hostname === '127.0.0.1' ||

@@ -25,6 +25,7 @@
             <label for="chart-type">Chart Type</label>
             <select id="chart-type">
                 <option value="box">Box Plot</option>
+                <option value="stacked">Stacked Bar Chart</option>
                 <option value="line">Line Chart of Means</option>
                 <option value="slope">Slope Chart (Human-AI)</option>
                 <option value="swarm">Swarm Plot</option>
@@ -47,8 +48,8 @@
         <div>
             <label for="sort-by">Sort by</label>
             <select id="sort-by">
-                <option value="mean" selected>Mean</option>
-                <option value="human_mean">&#160;&#160;Human Mean</option>
+                <option value="mean">Mean</option>
+                <option value="human_mean" selected>&#160;&#160;Human Mean</option>
                 <option value="ai_mean">&#160;&#160;AI Mean</option>
                 <option value="difference">&#160;&#160;Difference in Means (Human - AI)</option>
                 <option value="median">Median</option>
@@ -63,6 +64,7 @@
         <button id="tab-contexts-button" type="button" class="tab-button" role="tab" aria-controls="tab-contexts" aria-selected="false">Contexts</button>
     </div>
     <div id="tab-alterations" class="tab-panel active" role="tabpanel" aria-labelledby="tab-alterations-button">
+        <div id="stacked-filter-controls-alterations" class="stacked-filter-controls" style="display:none;"></div>
         <div id="plots-container" style="display:flex;flex-direction:column;align-items:center;">
             <div id="human-plot" style="width:90vw;max-width:1200px;"></div>
             <div id="ai-plot" style="width:90vw;max-width:1200px;"></div>
@@ -76,6 +78,7 @@
                 <option value="importance">Importance of Factors</option>
             </select>
         </div>
+        <div id="stacked-filter-controls-contexts" class="stacked-filter-controls" style="display:none;"></div>
         <div id="contexts-plots-container" style="display:flex;flex-direction:column;align-items:center;gap:24px;"></div>
     </div>
 </body>

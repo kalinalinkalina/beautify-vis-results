@@ -56,6 +56,12 @@ function getMarkerSymbol(group) {
     return 'circle';
 }
 
+function getResponseMetricLabel(scaleKey = 'acceptability', prefix = '') {
+    const scale = (window.getResponseScale && window.getResponseScale(scaleKey)) || {};
+    const baseLabel = scale.title || 'Value';
+    return prefix ? `${prefix} ${baseLabel}` : baseLabel;
+}
+
 function buildYAxisConfig(title, yTickVals, yTickText, anchorToX = false) {
     const config = {
         title,
@@ -86,6 +92,63 @@ function buildXAxisConfig(title, tickvals, ticktext, tickangle = 30, type = 'lin
     return config;
 }
 
+function getDefaultStackColors(count) {
+    if (count === 5) {
+        return ['#b2182b', '#ef8a62', '#fddbc7', '#a6dba0', '#1b7837'];
+    }
+    if (count === 6) {
+        return ['#b2182b', '#d6604d', '#f4a582', '#d9f0d3', '#7fbf7b', '#1b7837'];
+    }
+    const fallback = ['#b2182b', '#d6604d', '#f4a582', '#fddbc7', '#d9f0d3', '#7fbf7b', '#1b7837'];
+    return Array.from({ length: count }, (_, index) => fallback[index % fallback.length]);
+}
+
+function getResponseCategories(responseScale = 'acceptability') {
+    const scale = window.getResponseScale(responseScale);
+    const values = Array.isArray(scale.tickvals) ? scale.tickvals : [];
+    const labels = Array.isArray(scale.ticktext) ? scale.ticktext : values.map(value => String(value));
+    const colors = Array.isArray(scale.colors) && scale.colors.length === values.length
+        ? scale.colors
+        : getDefaultStackColors(values.length);
+
+    return values.map((value, index) => ({
+        value,
+        label: labels[index] || String(value),
+        color: colors[index]
+    }));
+}
+
+function abbreviateTopAxisLabel(label) {
+    if (typeof label !== 'string') return label;
+
+    const normalized = label.trim();
+    const exactMap = {
+        'Scientist who creates vis': 'Creates vis',
+        'Scientist who uses vis': 'Uses vis',
+        'Viz Practitioner': 'Viz pract.',
+        'Vis Researcher': 'Vis research',
+        'Less than 1 year': '<1 year',
+        '1-3 years': '1-3 yrs',
+        '3-5 years': '3-5 yrs',
+        '5-10 years': '5-10 yrs',
+        '10-20 years': '10-20 yrs',
+        'More than 20 years': '20+ yrs',
+        'Less than once a year': '<1/yr',
+        'This is a primary part of my work': 'Primary work',
+        'Would use an AI tool for beautification': 'AI tool use'
+    };
+
+    if (exactMap[normalized]) {
+        return exactMap[normalized];
+    }
+
+    if (normalized.length <= 16) {
+        return normalized;
+    }
+
+    return `${normalized.slice(0, 13).trim()}...`;
+}
+
 function makeBoxPlot(data, x, y, color, options, containerId) {
     const {
         title = '',
@@ -95,8 +158,11 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         yaxisTitle = '',
         xTickAngle = 30,
         responseScale = 'acceptability',
+        legendTitle = '',
         legendOrder = null,
         traceNameMap = null,
+        hoverNameMap = {},
+        hoverLabel = legendTitle || 'Group',
         showLegend = true
     } = options || {};
 
@@ -104,8 +170,17 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
         colorMap,
         traceType: 'box',
         traceNameMap: traceNameMap || {},
+        hoverNameMap,
+        hoverLabel,
+        responseScale,
         showLegend
     });
+    const hoverTraces = window.buildBoxHoverTraces ? window.buildBoxHoverTraces(data, color, x, y, {
+        traceNameMap: traceNameMap || {},
+        hoverNameMap,
+        hoverLabel,
+        responseScale
+    }) : [];
     const xVals = [...new Set(data.map(row => row[x]))];
     const { tickvals: xTickVals, ticktext: xTickText } = window.getAxisTicks(xVals, window.FEATURE_LABELS || {});
     const { tickvals: yTickVals, ticktext: yTickText, range: yRange, title: defaultYTitle } = window.getLikertYAxisTicks(responseScale);
@@ -143,7 +218,11 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
             ticktext: yTickText,
             range: yRange
         },
-        legendOptions: legendOrder ? { traceorder: 'normal' } : {},
+        legendOptions: Object.assign(
+            {},
+            legendOrder ? { traceorder: 'normal' } : {},
+            legendTitle ? { title: { text: legendTitle } } : {}
+        ),
         showLegend,
         margin: { r: 180 }
     });
@@ -151,7 +230,178 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
     layout.boxgap = 0.3;
     layout.boxgroupgap = 0.2;
 
-    const filteredTraces = window.filterValidTraces(sortedTraces);
+    const filteredTraces = window.filterValidTraces([...sortedTraces, ...hoverTraces]);
+    if (filteredTraces.length === 0) return;
+    const plotContainer = resolvePlotContainer(containerId);
+    if (!plotContainer) return;
+    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+}
+
+function makeStackedBarChart(data, x, score, group, options, containerId) {
+    options = options || {};
+    const {
+        title = '',
+        categoryOrders = {},
+        xaxisTitle = '',
+        yaxisTitle = '',
+        responseScale = 'acceptability',
+        traceNameMap = {},
+        groupLabelMap = {},
+        groupHoverLabel = 'Group',
+        xTickAngle = 30,
+        showLegend = true
+    } = options;
+
+    const rawFeatureOrder = categoryOrders[x] || [...new Set(data.map(row => row[x]))];
+    const featureOrder = Array.isArray(rawFeatureOrder)
+        ? rawFeatureOrder
+        : (rawFeatureOrder && typeof rawFeatureOrder === 'object' ? Object.values(rawFeatureOrder) : [rawFeatureOrder]);
+    const rawGroupOrder = categoryOrders[group] || [...new Set(data.map(row => row[group]))];
+    const groupOrder = (Array.isArray(rawGroupOrder)
+        ? rawGroupOrder
+        : (rawGroupOrder && typeof rawGroupOrder === 'object' ? Object.values(rawGroupOrder) : [rawGroupOrder]))
+        .filter(groupName => groupName !== undefined && groupName !== null && String(groupName).trim().toLowerCase() !== 'nan' && String(groupName).trim() !== '');
+    const scale = window.getResponseScale(responseScale);
+
+    const categories = getResponseCategories(responseScale);
+    if (featureOrder.length === 0 || groupOrder.length === 0 || categories.length === 0) return;
+
+    const scoreLookup = new Map(categories.map(category => [category.value, category]));
+    const distributions = {};
+
+    featureOrder.forEach(feature => {
+        distributions[feature] = {};
+        groupOrder.forEach(groupName => {
+            const counts = {};
+            categories.forEach(category => {
+                counts[category.value] = 0;
+            });
+            distributions[feature][groupName] = { counts, total: 0 };
+        });
+    });
+
+    data.forEach(row => {
+        const feature = row[x];
+        const groupName = row[group];
+        const responseCategory = scoreLookup.get(row[score]);
+        if (!distributions[feature] || !distributions[feature][groupName] || !responseCategory) return;
+        distributions[feature][groupName].counts[responseCategory.value] += 1;
+        distributions[feature][groupName].total += 1;
+    });
+
+    const xPositions = [];
+    const groupLabels = [];
+    const bottomTickVals = [];
+    const bottomTickText = [];
+    const intraGroupStep = 0.82;
+    const interFeatureGap = 1.15;
+
+    featureOrder.forEach((feature, featureIndex) => {
+        const featureStart = featureIndex * ((groupOrder.length - 1) * intraGroupStep + interFeatureGap);
+        const featureCenter = featureStart + (((groupOrder.length - 1) * intraGroupStep) / 2);
+        bottomTickVals.push(featureCenter);
+        bottomTickText.push(getFeatureLabel(feature));
+        groupOrder.forEach((groupName, groupIndex) => {
+            xPositions.push(featureStart + (groupIndex * intraGroupStep));
+            groupLabels.push(groupLabelMap[groupName] || groupName);
+        });
+    });
+    const xMin = xPositions.length ? xPositions[0] - 0.5 : -0.5;
+    const xMax = xPositions.length ? xPositions[xPositions.length - 1] + 0.5 : 0.5;
+
+    const traces = categories.map(category => {
+        const yVals = [];
+        const customdata = [];
+        const includeGroupLine = groupOrder.length > 1;
+
+        featureOrder.forEach(feature => {
+            groupOrder.forEach(groupName => {
+                const entry = distributions[feature][groupName];
+                const count = entry.counts[category.value] || 0;
+                const total = entry.total || 0;
+                const percent = total > 0 ? (count / total) * 100 : 0;
+
+                yVals.push(percent);
+                customdata.push([
+                    getFeatureLabel(feature),
+                    groupLabelMap[groupName] || groupName,
+                    category.label,
+                    count,
+                    total
+                ]);
+            });
+        });
+
+        return {
+            type: 'bar',
+            x: xPositions,
+            y: yVals,
+            name: category.label,
+            marker: {
+                color: category.color,
+                line: { color: '#ffffff', width: 0.6 }
+            },
+            customdata,
+            hovertemplate: includeGroupLine
+                ? `<b>%{customdata[0]}</b><br>${groupHoverLabel}: %{customdata[1]}<br>${scale.title || 'Response'}: %{customdata[2]}<br>Share: %{y:.1f}%<br>Responses: %{customdata[3]} of %{customdata[4]}<extra></extra>`
+                : `<b>%{customdata[0]}</b><br>${scale.title || 'Response'}: %{customdata[2]}<br>Share: %{y:.1f}%<br>Responses: %{customdata[3]} of %{customdata[4]}<extra></extra>`,
+            showlegend: showLegend
+        };
+    });
+
+    const showTopAxis = groupOrder.length > 1;
+    const compactGroupLabels = groupLabels.map(label => abbreviateTopAxisLabel(label));
+    const topLabelFontSize = xPositions.length >= 36 ? 9 : (xPositions.length >= 24 ? 10 : 11);
+    const topAxisAnnotations = showTopAxis
+        ? xPositions.map((position, index) => ({
+            x: position,
+            y: 1.012,
+            xref: 'x',
+            yref: 'paper',
+            text: compactGroupLabels[index],
+            textangle: -xTickAngle,
+            showarrow: false,
+            xanchor: 'left',
+            yanchor: 'bottom',
+            align: 'left',
+            font: { size: topLabelFontSize, color: '#444' }
+        }))
+        : [];
+    const layout = buildDefaultPlotLayout({
+        title,
+        xaxis: buildXAxisConfig(
+            xaxisTitle,
+            bottomTickVals,
+            bottomTickText,
+            xTickAngle,
+            'linear',
+            [xMin, xMax]
+        ),
+        yaxis: {
+            title: yaxisTitle || 'Responses (%)',
+            range: [0, 100],
+            ticksuffix: '%',
+            automargin: true
+        },
+        legendOptions: { title: { text: scale.title || 'Response' }, traceorder: 'reversed' },
+        showLegend,
+        margin: { r: 180, t: showTopAxis ? 122 : 80, b: 120 },
+        hovermode: 'x unified'
+    });
+    layout.barmode = 'stack';
+    layout.bargap = 0.22;
+    layout.bargroupgap = 0.08;
+    layout.xaxis.automargin = true;
+    layout.annotations = topAxisAnnotations;
+    layout.title = {
+        text: title,
+        x: 0.5,
+        xanchor: 'center',
+        y: showTopAxis ? 0.985 : 0.97,
+        yanchor: 'top'
+    };
+
+    const filteredTraces = window.filterValidTraces(traces);
     if (filteredTraces.length === 0) return;
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
@@ -168,11 +418,14 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const forceAIStyle = options.forceAIStyle || false;
     const sharedLayout = options.sharedLayout || null;
     const traceNameMap = options.traceNameMap || {};
+    const hoverNameMap = options.hoverNameMap || {};
+    const hoverLabel = options.hoverLabel || legendTitle || 'Group';
     const groupOrder = options.groupOrder || legendOrder;
     const xaxisTitle = options.xaxisTitle || 'Type of Alteration';
     const yaxisTitle = options.yaxisTitle || '';
     const xTickAngle = options.xTickAngle ?? 30;
     const responseScale = options.responseScale || 'acceptability';
+    const meanLabel = getResponseMetricLabel(responseScale, 'Mean');
     featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
     function colorToRgba(color, alpha) {
         if (!color) {
@@ -209,6 +462,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             const v = groupData && groupData.hasOwnProperty(f) ? groupData[f] : null;
             return (v !== null && v !== undefined && !Number.isNaN(v)) ? v : null;
         });
+        const hoverName = hoverNameMap[group] || group;
         let markerSymbol = safeMarkerSymbols[group] || getMarkerSymbol(group);
         if (isScientistGroup(group)) {
             markerSymbol = 'square';
@@ -309,6 +563,12 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
         const lineTrace = {
             x: xVals,
             y: yVals,
+            customdata: featureOrder.map(feature => {
+                const std = stdDevDict && stdDevDict[group] && stdDevDict[group][feature] !== undefined && stdDevDict[group][feature] !== null
+                    ? `SD: ${Number(stdDevDict[group][feature]).toFixed(2)}`
+                    : '';
+                return [getFeatureLabel(feature), hoverName, std];
+            }),
             name: traceNameMap[group] || group,
             mode: 'lines+markers',
             line: { color: legendColors[group] || undefined, width: 2 },
@@ -317,7 +577,10 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             showlegend: showLegend,
             legendgroup: group,
             layer: 'above',
-            isConfidenceBand: false
+            isConfidenceBand: false,
+            hovertemplate: validGroupOrder.length > 1
+                ? `<b>%{customdata[0]}</b><br>${hoverLabel}: %{customdata[1]}<br>${meanLabel}: %{y:.2f}<br>%{customdata[2]}<extra></extra>`
+                : `<b>%{customdata[0]}</b><br>${meanLabel}: %{y:.2f}<br>%{customdata[2]}<extra></extra>`
         };
         lineTraces.push(lineTrace);
     });
@@ -369,7 +632,10 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     const groupOrder = options.groupOrder || legendOrder;
     featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
     const traceNameMap = options.traceNameMap || {};
+    const hoverNameMap = options.hoverNameMap || {};
+    const hoverLabel = options.hoverLabel || legendTitle || 'Group';
     const pairedData = options.pairedData || [];
+    const meanLabel = 'Mean Acceptability';
 
     const traces = [];
 
@@ -421,6 +687,8 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 if (['Never'].includes(group)) {
                     markerSymbol = 'x';
                 }
+                const hoverName = hoverNameMap[group] || group;
+                const featureLabel = getFeatureLabel(feature);
 
                 traces.push({
                     x: [featureX - 0.1],
@@ -434,7 +702,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                     },
                     showlegend: showLegend && featureIdx === 0,
                     legendgroup: group,
-                    hovertemplate: `<b>${group}</b><br>Human: ${humanMean.toFixed(2)}<extra></extra>`,
+                    hovertemplate: `<b>${featureLabel}</b><br>${hoverLabel}: ${hoverName}<br>Type: Human<br>${meanLabel}: ${humanMean.toFixed(2)}<extra></extra>`,
                     name: traceNameMap[group] || group
                 });
 
@@ -450,7 +718,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                     },
                     showlegend: false,
                     legendgroup: group,
-                    hovertemplate: `<b>${group}</b><br>AI: ${aiMean.toFixed(2)}<extra></extra>`,
+                    hovertemplate: `<b>${featureLabel}</b><br>${hoverLabel}: ${hoverName}<br>Type: AI<br>${meanLabel}: ${aiMean.toFixed(2)}<extra></extra>`,
                     name: ''
                 });
             });
@@ -461,6 +729,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
             if (humanMean === null || aiMean === null) return;
             const humanX = featureX - 0.15;
             const aiX = featureX + 0.15;
+            const featureLabel = getFeatureLabel(feature);
 
             traces.push({
                 x: [humanX, aiX],
@@ -484,7 +753,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 },
                 showlegend: showLegend && feature === featureOrder[0],
                 legendgroup: 'human',
-                hovertemplate: `Human: ${humanMean.toFixed(2)}<extra></extra>`,
+                hovertemplate: `<b>${featureLabel}</b><br>Type: Human<br>${meanLabel}: ${humanMean.toFixed(2)}<extra></extra>`,
                 name: 'Human'
             });
 
@@ -500,7 +769,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
                 },
                 showlegend: showLegend && feature === featureOrder[0],
                 legendgroup: 'ai',
-                hovertemplate: `AI: ${aiMean.toFixed(2)}<extra></extra>`,
+                hovertemplate: `<b>${featureLabel}</b><br>Type: AI<br>${meanLabel}: ${aiMean.toFixed(2)}<extra></extra>`,
                 name: 'AI'
             });
         }
@@ -533,6 +802,9 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         yaxisTitle = '',
         responseScale = 'acceptability',
         traceNameMap = {},
+        legendTitle = '',
+        hoverNameMap = {},
+        hoverLabel = legendTitle || 'Group',
         legendOrder = null,
         jitterAmplitude = 0.54,
         markerSize = 7,
@@ -549,6 +821,7 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
     const validGroupOrder = groupOrder.filter(g => g !== undefined && g !== null && String(g).trim().toLowerCase() !== 'nan' && String(g).trim() !== '');
     let drawOrder = validGroupOrder;
     let legendTraceOrder = 'normal';
+    const scaleTitle = getResponseMetricLabel(responseScale);
     if (group === 'Type' && validGroupOrder.includes('Human') && validGroupOrder.includes('AI')) {
         drawOrder = validGroupOrder.filter(g => g !== 'Human');
         drawOrder.push('Human');
@@ -569,8 +842,8 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
             const jitterY = (Math.random() - 0.5) * jitterAmplitude;
             return row[y] + jitterY;
         });
-        const textLabels = groupData.map(row => getFeatureLabel(row[x]));
         const traceName = traceNameMap[groupName] || groupName;
+        const hoverName = hoverNameMap[groupName] || groupName;
 
         traces.push({
             x: xVals,
@@ -589,8 +862,14 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
                 opacity: markerOpacity,
                 line: { width: 1, color: '#333' }
             },
-            text: textLabels,
-            hovertemplate: `<b>${traceName}</b><br>%{text}<br>Acceptability: %{y}<extra></extra>`,
+            customdata: groupData.map(row => [
+                getFeatureLabel(row[x]),
+                hoverName,
+                window.getResponseLabelForValue ? window.getResponseLabelForValue(row[y], responseScale) : String(row[y])
+            ]),
+            hovertemplate: validGroupOrder.length > 1
+                ? `<b>%{customdata[0]}</b><br>${hoverLabel}: %{customdata[1]}<br>${scaleTitle}: %{customdata[2]}<extra></extra>`
+                : `<b>%{customdata[0]}</b><br>${scaleTitle}: %{customdata[2]}<extra></extra>`,
             legendgroup: traceName,
             showlegend: showLegend
         });
@@ -602,7 +881,10 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
         title,
         xaxis: buildXAxisConfig(xaxisTitle, featureOrder.map((_, i) => i), xTickText, xTickAngle, 'linear', [-0.5, featureOrder.length - 0.5]),
         yaxis: buildYAxisConfig(yaxisTitle || defaultYTitle, yTickVals, yTickText, true),
-        legendOptions: { traceorder: legendTraceOrder },
+        legendOptions: Object.assign(
+            { traceorder: legendTraceOrder },
+            legendTitle ? { title: { text: legendTitle } } : {}
+        ),
         showLegend,
         margin: { r: 180 }
     });
@@ -638,6 +920,7 @@ function buildDefaultPlotLayout({ title = '', xaxis = {}, yaxis = {}, legendOpti
 
 if (typeof window !== 'undefined') {
     window.makeBoxPlot = makeBoxPlot;
+    window.makeStackedBarChart = makeStackedBarChart;
     window.makeLineChart = makeLineChart;
     window.makeSlopeChart = makeSlopeChart;
     window.makeSwarmPlot = makeSwarmPlot;

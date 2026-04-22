@@ -3,11 +3,11 @@
  * API endpoint for returning ONLY AGGREGATED DATA (never raw data) for IRB compliance.
  *
  * Query Parameters:
- *   chartType: 'box' | 'line' | 'slope' | 'swarm' (default: 'box')
+ *   chartType: 'box' | 'stacked' | 'line' | 'slope' | 'swarm' (default: 'box')
  *   comparisonType: e.g., 'summary', 'human_ai', 'role', etc. (default: 'summary')
  *
  * Returns:
- *   JSON object with only aggregated data (box plot, line chart, slope chart, or swarm chart aggregations).
+ *   JSON object with only aggregated data (box plot, stacked bar, line chart, slope chart, or swarm chart aggregations).
  *   Never returns raw or row-level data.
  *
  * IRB Compliance: This endpoint is guaranteed to never expose raw data.
@@ -38,6 +38,8 @@ function doGet(e) {
       result = { error: 'Slope charts are not available for contexts.' };
     } else if (chartType === 'box') {
       result = aggregateContextBoxPlot(data, comparisonType, view);
+    } else if (chartType === 'stacked') {
+      result = aggregateContextStackedBarChart(data, comparisonType, view);
     } else if (chartType === 'line') {
       result = aggregateContextLineChart(data, comparisonType, view);
     } else if (chartType === 'swarm') {
@@ -47,6 +49,8 @@ function doGet(e) {
     }
   } else if (chartType === 'box') {
     result = aggregateBoxPlot(data, comparisonType);
+  } else if (chartType === 'stacked') {
+    result = aggregateStackedBarChart(data, comparisonType);
   } else if (chartType === 'line') {
     result = aggregateLineChart(data, comparisonType);
   } else if (chartType === 'slope') {
@@ -143,11 +147,12 @@ function getComparisonColumn(comparisonType) {
  * API Documentation:
  *
  * GET endpoint (doGet):
- *   - chartType: 'box', 'line', or 'slope'
+ *   - chartType: 'box', 'stacked', 'line', 'slope', or 'swarm'
  *   - comparisonType: 'human_ai', 'summary', 'role', 'experience', 'frequency_vis', 'frequency_public', 'domain', 'age', 'tool_use'
  *
  * Returns:
  *   For 'box': { features, groups, data, humanGroups, aiGroups, groupCounts }
+ *   For 'stacked': { features, groups, data, humanGroups, aiGroups, groupCounts }
  *   For 'line': { features, groups, means, meansHuman, meansAI, stdsHuman, stdsAI, groupCounts }
  *   For 'slope': { features, groups, meansHuman, meansAI, groupCounts, pairedData }
  *   For 'swarm': { features, groups, data, dataHuman, dataAI, humanGroups, aiGroups, groupCounts }
@@ -326,6 +331,10 @@ function aggregateContextBoxPlot(data, comparisonType, view) {
   return aggregateContextScorePlot(data, comparisonType, view);
 }
 
+function aggregateContextStackedBarChart(data, comparisonType, view) {
+  return aggregateContextScorePlot(data, comparisonType, view);
+}
+
 function aggregateContextSwarmPlot(data, comparisonType, view) {
   return aggregateContextScorePlot(data, comparisonType, view);
 }
@@ -445,6 +454,10 @@ function aggregateBoxPlot(data, comparisonType) {
   }
 
   return output;
+}
+
+function aggregateStackedBarChart(data, comparisonType) {
+  return aggregateBoxPlot(data, comparisonType);
 }
 
 // --- Aggregation for Line Chart (Means and Standard Deviations) ---

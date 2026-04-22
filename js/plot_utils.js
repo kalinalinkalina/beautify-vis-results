@@ -50,6 +50,17 @@ function getLikertYAxisTicks(scaleKey = 'acceptability') {
     };
 }
 
+function getResponseLabelForValue(value, scaleKey = 'acceptability') {
+    const scale = getResponseScale(scaleKey);
+    const tickvals = Array.isArray(scale.tickvals) ? scale.tickvals : [];
+    const ticktext = Array.isArray(scale.ticktext) ? scale.ticktext : [];
+    const matchIndex = tickvals.findIndex(tickValue => Number(tickValue) === Number(value));
+    if (matchIndex !== -1 && ticktext[matchIndex]) {
+        return ticktext[matchIndex];
+    }
+    return value !== undefined && value !== null ? String(value) : '';
+}
+
 function getFeatureSortOrder(sortBy, meltedHuman, meltedAI) {
     function groupBy(arr, key) {
         return (arr || []).reduce((acc, row) => {
@@ -178,12 +189,18 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
         traceType = 'box',
         markerOptions = {},
         traceNameMap = {},
+        hoverNameMap = {},
+        hoverLabel = 'Group',
+        responseScale = 'acceptability',
         showLegend = true
     } = options;
     const groups = [...new Set(data.map(row => row[groupCol]))];
+    const scaleTitle = getResponseScale(responseScale).title || 'Value';
+    const includeGroupLine = groups.length > 1;
     return groups.map(group => {
         const groupData = data.filter(row => row[groupCol] === group);
         const traceName = traceNameMap[group] || group;
+        const hoverName = hoverNameMap[group] || group;
         const marker = markerOptions[group] || { color: colorMap[group] || undefined };
         if (traceType === 'box') {
             return {
@@ -193,6 +210,7 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
                 type: 'box',
                 marker: marker,
                 boxpoints: 'outliers',
+                hoverinfo: 'skip',
                 boxmean: false,
                 line: { width: 2 },
                 median: { line: { width: 6 } },
@@ -216,13 +234,89 @@ function buildTracesFromGroups(data, groupCol, x, y, options = {}) {
     }).filter(Boolean);
 }
 
+function calculateQuantile(values, quantile) {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const position = (sorted.length - 1) * quantile;
+    const base = Math.floor(position);
+    const remainder = position - base;
+    if (sorted[base + 1] !== undefined) {
+        return sorted[base] + remainder * (sorted[base + 1] - sorted[base]);
+    }
+    return sorted[base];
+}
+
+function buildBoxHoverTraces(data, groupCol, x, y, options = {}) {
+    const {
+        traceNameMap = {},
+        hoverNameMap = {},
+        hoverLabel = 'Group',
+        responseScale = 'acceptability'
+    } = options;
+    const includeGroupLine = [...new Set(data.map(row => row[groupCol]))].length > 1;
+    const groupedRows = data.reduce((acc, row) => {
+        const key = `${row[groupCol]}|||${row[x]}`;
+        acc[key] = acc[key] || [];
+        acc[key].push(row);
+        return acc;
+    }, {});
+
+    return Object.entries(groupedRows).flatMap(([key, rows]) => {
+        const [group, feature] = key.split('|||');
+        const values = rows
+            .map(row => Number(row[y]))
+            .filter(value => !Number.isNaN(value));
+        if (!values.length) return [];
+
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const q1 = calculateQuantile(values, 0.25);
+        const median = calculateQuantile(values, 0.5);
+        const q3 = calculateQuantile(values, 0.75);
+        const hoverName = hoverNameMap[group] || group;
+        const featureLabel = getFeatureLabel(feature);
+        const traceName = traceNameMap[group] || group;
+        const customdata = [[featureLabel, hoverName, min, q1, median, q3, max, values.length]];
+        const hovertemplate = includeGroupLine
+            ? `<b>%{customdata[0]}</b><br>${hoverLabel}: %{customdata[1]}<br>N: %{customdata[7]}<br>Max: %{customdata[6]:.2f}<br>Q3: %{customdata[5]:.2f}<br>Median: %{customdata[4]:.2f}<br>Q1: %{customdata[3]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>`
+            : `<b>%{customdata[0]}</b><br>N: %{customdata[7]}<br>Max: %{customdata[6]:.2f}<br>Q3: %{customdata[5]:.2f}<br>Median: %{customdata[4]:.2f}<br>Q1: %{customdata[3]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>`;
+
+        const segments = [
+            { base: min, value: q1 - min, width: 0.08 },
+            { base: q1, value: Math.max(median - q1, 0.001), width: 0.34 },
+            { base: median, value: Math.max(q3 - median, 0.001), width: 0.34 },
+            { base: q3, value: max - q3, width: 0.08 }
+        ].filter(segment => segment.value > 0);
+
+        return segments.map(segment => ({
+            type: 'bar',
+            x: [feature],
+            y: [segment.value],
+            base: segment.base,
+            width: segment.width,
+            offsetgroup: traceName,
+            alignmentgroup: traceName,
+            legendgroup: traceName,
+            marker: {
+                color: 'rgba(0,0,0,0)',
+                line: { color: 'rgba(0,0,0,0)', width: 0 }
+            },
+            customdata,
+            hovertemplate,
+            showlegend: false
+        }));
+    });
+}
+
 // Export for use by chart builder modules
 if (typeof window !== 'undefined') {
     window.getResponseScale = getResponseScale;
+    window.getResponseLabelForValue = getResponseLabelForValue;
     window.filterValidTraces = filterValidTraces;
     window.getAxisTicks = getAxisTicks;
     window.getLikertYAxisTicks = getLikertYAxisTicks;
     window.getFeatureSortOrder = getFeatureSortOrder;
     window.getContextFeatureSortOrder = getContextFeatureSortOrder;
     window.buildTracesFromGroups = buildTracesFromGroups;
+    window.buildBoxHoverTraces = buildBoxHoverTraces;
 }

@@ -143,13 +143,15 @@ const RESPONSE_SCALES = {
         title: 'Acceptability',
         tickvals: [0, 1, 2, 3, 4, 5],
         ticktext: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Usually (4)", "Always (5)"],
-        range: [-0.5, 5.5]
+        range: [-0.5, 5.5],
+        colors: ['#b2182b', '#d6604d', '#f4a582', '#d9f0d3', '#7fbf7b', '#1b7837']
     },
     use_case_acceptability: {
         title: 'Acceptability',
         tickvals: [0, 1, 2, 3, 4],
         ticktext: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Always (4)"],
-        range: [-0.5, 4.5]
+        range: [-0.5, 4.5],
+        colors: ['#b2182b', '#ef8a62', '#fddbc7', '#a6dba0', '#1b7837']
     },
     comfort_importance: {
         title: 'Importance',
@@ -161,7 +163,8 @@ const RESPONSE_SCALES = {
             "Very (3)",
             "Extremely (4)"
         ],
-        range: [-0.5, 4.5]
+        range: [-0.5, 4.5],
+        colors: ['#dbeafe', '#93c5fd', '#60a5fa', '#2563eb', '#1d4ed8']
     },
     importance: {
         title: 'Importance',
@@ -173,7 +176,8 @@ const RESPONSE_SCALES = {
             "Very much (3)",
             "Extremely (4)"
         ],
-        range: [-0.5, 4.5]
+        range: [-0.5, 4.5],
+        colors: ['#dbeafe', '#93c5fd', '#60a5fa', '#2563eb', '#1d4ed8']
     }
 };
 
@@ -182,25 +186,25 @@ const CONTEXT_VIEW_CONFIG = {
         label: 'Use Cases',
         features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
         responseScale: 'use_case_acceptability',
-        plotTitlePrefix: 'Use Case',
+        plotTitlePrefix: 'Context',
         combineFeatures: true,
-        combinedPlotTitle: 'How acceptable would you find using AI-enhanced images in the following contexts?'
+        combinedPlotTitle: 'Acceptability by Context'
     },
     comfort: {
         label: 'Comfort',
         features: ['Comfort_1', 'Comfort_2', 'Comfort_3', 'Comfort_4'],
         responseScale: 'comfort_importance',
-        plotTitlePrefix: 'Comfort',
+        plotTitlePrefix: 'Comfort Condition',
         combineFeatures: true,
-        combinedPlotTitle: 'How important is each condition for your comfort with using AI-enhanced images?'
+        combinedPlotTitle: 'Importance of Comfort Conditions'
     },
     importance: {
         label: 'Importance',
         features: ['Importance_1', 'Importance_2'],
         responseScale: 'importance',
-        plotTitlePrefix: 'Importance',
+        plotTitlePrefix: 'Process Factor',
         combineFeatures: true,
-        combinedPlotTitle: 'How important is each of the following in a visual enhancement process?'
+        combinedPlotTitle: 'Importance of Process Factors'
     }
 };
 
@@ -231,9 +235,9 @@ function getContextViewConfig(view) {
         label: 'Use Cases',
         features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
         responseScale: 'use_case_acceptability',
-        plotTitlePrefix: 'Use Case',
+        plotTitlePrefix: 'Context',
         combineFeatures: true,
-        combinedPlotTitle: 'How acceptable would you find using AI-enhanced images in the following contexts?'
+        combinedPlotTitle: 'Acceptability by Context'
     };
 }
 

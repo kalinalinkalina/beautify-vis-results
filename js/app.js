@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- State ---
     let backendData = null;
     let activeTab = 'alterations';
+    let selectedStackedGroups = new Set();
+    let stackedFilterSignature = '';
 
     const generateColorScale = window.generateColorScale || function(legend) {
         const colors = window.DEFAULT_COLOR_PALETTE || [
@@ -45,9 +47,9 @@ document.addEventListener('DOMContentLoaded', function() {
             label: 'Use Cases',
             features: ['Use_Cases_1', 'Use_Cases_2', 'Use_Cases_3', 'Use_Cases_4', 'Use_Cases_5', 'Use_Cases_6'],
             responseScale: 'use_case_acceptability',
-            plotTitlePrefix: 'Use Case',
+            plotTitlePrefix: 'Context',
             combineFeatures: true,
-            combinedPlotTitle: 'How acceptable would you find using AI-enhanced images in the following contexts?'
+            combinedPlotTitle: 'Acceptability by Context'
         };
     };
 
@@ -178,6 +180,101 @@ document.addEventListener('DOMContentLoaded', function() {
         return activeTab === 'contexts';
     }
 
+    function getStackedFilterContainer(tabName = activeTab) {
+        return document.getElementById(tabName === 'contexts'
+            ? 'stacked-filter-controls-contexts'
+            : 'stacked-filter-controls-alterations');
+    }
+
+    function getAvailableStackedGroups(data = backendData, tabName = activeTab) {
+        if (!data) return [];
+        if (tabName === 'contexts' && data.contextViews) {
+            return Array.from(new Set(
+                Object.values(data.contextViews)
+                    .flatMap(viewData => Array.isArray(viewData?.groups) ? viewData.groups : [])
+                    .filter(group => group !== undefined && group !== null && String(group).trim() !== '')
+            ));
+        }
+        return Array.isArray(data.groups)
+            ? data.groups.filter(group => group !== undefined && group !== null && String(group).trim() !== '')
+            : [];
+    }
+
+    function getOrderedStackedGroups(data = backendData, tabName = activeTab, comparisonType = getSelections().comparisonType) {
+        const availableGroups = getAvailableStackedGroups(data, tabName);
+        if (!availableGroups.length) return [];
+        if (comparisonType === 'summary' || comparisonType === 'human_ai') {
+            return availableGroups;
+        }
+
+        const comparisonData = (tabName === 'contexts' && data && data.contextViews)
+            ? Object.values(data.contextViews).find(viewData => Array.isArray(viewData?.groups) && viewData.groups.length)
+            : data;
+
+        if (!comparisonData) {
+            return availableGroups;
+        }
+
+        const groupPresentation = buildGroupPresentation(comparisonType, comparisonData);
+        const ordered = (groupPresentation.groupOrder || []).filter(group => availableGroups.includes(group));
+        availableGroups.forEach(group => {
+            if (!ordered.includes(group)) {
+                ordered.push(group);
+            }
+        });
+        return ordered;
+    }
+
+    function syncStackedFilterState(availableGroups, tabName = activeTab, comparisonType = getSelections().comparisonType) {
+        const signature = `${tabName}|${comparisonType}|${availableGroups.join('|')}`;
+        if (signature !== stackedFilterSignature) {
+            selectedStackedGroups = new Set(availableGroups);
+            stackedFilterSignature = signature;
+            return;
+        }
+
+        selectedStackedGroups = new Set(
+            [...selectedStackedGroups].filter(group => availableGroups.includes(group))
+        );
+    }
+
+    function getStackedFilterDisplayLabel(group, comparisonType = getSelections().comparisonType) {
+        const config = getComparisonConfig(comparisonType);
+        return (config.labelMap && config.labelMap[group]) || group;
+    }
+
+    function renderStackedFilterControls() {
+        const { chartType, comparisonType } = getSelections();
+        const container = getStackedFilterContainer();
+        if (!container) return;
+
+        if (chartType !== 'stacked' || comparisonType === 'summary' || !backendData) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        const availableGroups = getOrderedStackedGroups();
+        if (!availableGroups.length) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = `
+            <p class="stacked-filter-label">Show variables:</p>
+            <div class="stacked-filter-options">
+                ${availableGroups.map(group => `
+                    <label class="stacked-filter-option">
+                        <input type="checkbox" class="stacked-filter-checkbox" value="${String(group).replace(/"/g, '&quot;')}" ${selectedStackedGroups.has(group) ? 'checked' : ''}>
+                        <span>${getStackedFilterDisplayLabel(group)}</span>
+                    </label>
+                `).join('')}
+            </div>
+        `;
+        container.style.display = 'flex';
+    }
+
     function validateBackendDataShape(data, chartType, tabName = activeTab) {
         if (!data || typeof data !== 'object') {
             throw new Error('Backend response is not a valid object.');
@@ -213,6 +310,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (chartType === 'box') {
             if (typeof data.data !== 'object' || data.data === null) {
                 throw new Error('Box plot response must include "data".');
+            }
+        }
+        if (chartType === 'stacked') {
+            if (typeof data.data !== 'object' || data.data === null) {
+                throw new Error('Stacked bar chart response must include "data".');
             }
         }
         if (chartType === 'line') {
@@ -295,11 +397,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const meta = getGroupMeta(comparisonType, rawGroups);
         const labelMap = meta.labelMap;
         const groupKey = 'Group';
+        const displayNameMap = {};
         let colorMap;
         if (labelMap && meta.colorMap) {
             colorMap = {};
             rawGroups.forEach(rawGroup => {
                 const shortName = labelMap[rawGroup] || rawGroup;
+                displayNameMap[rawGroup] = shortName;
                 if (meta.colorMap[shortName]) {
                     colorMap[rawGroup] = meta.colorMap[shortName];
                 }
@@ -310,6 +414,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } else {
             colorMap = meta.colorMap || generateColorScale(rawGroups);
+            rawGroups.forEach(rawGroup => {
+                displayNameMap[rawGroup] = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
+            });
         }
         let groupOrder = rawGroups.slice();
         const traceNameMap = {};
@@ -351,7 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
             colorMap = generateColorScale(groupOrder);
         }
 
-        return { rawGroups, groupOrder, groupKey, colorMap, traceNameMap };
+        return { rawGroups, groupOrder, groupKey, colorMap, traceNameMap, displayNameMap };
     }
 
     // --- Utility: set plot visibility before rendering ---
@@ -420,6 +527,31 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
+    function getLegendTitleForComparison(comparisonType) {
+        return getComparisonLabel(comparisonType);
+    }
+
+    function getAlterationPlotTitle(titleKey, comparisonLabel = '') {
+        const titles = {
+            acceptabilityHumanVsAI: 'Acceptability: Human vs AI Alterations',
+            acceptabilitySummary: 'Acceptability Summary',
+            acceptabilityHuman: 'Acceptability: Human Alterations',
+            acceptabilityAI: 'Acceptability: AI Alterations',
+            acceptabilityHumanByComparison: `Acceptability: Human Alterations by ${comparisonLabel}`,
+            acceptabilityAIByComparison: `Acceptability: AI Alterations by ${comparisonLabel}`,
+            meanHumanVsAI: 'Mean Acceptability: Human vs AI',
+            meanSummary: 'Mean Acceptability Summary',
+            meanHuman: 'Mean Acceptability: Human Alterations',
+            meanAI: 'Mean Acceptability: AI Alterations',
+            meanByComparison: `Mean Acceptability by ${comparisonLabel}`,
+            distributionHumanVsAI: 'Acceptability Distribution: Human vs AI Alterations',
+            distributionSummary: 'Acceptability Distribution',
+            distributionHumanByComparison: `Acceptability Distribution: Human Alterations by ${comparisonLabel}`,
+            distributionAIByComparison: `Acceptability Distribution: AI Alterations by ${comparisonLabel}`
+        };
+        return titles[titleKey] || '';
+    }
+
     function buildGroupedMetricPresentation(comparisonType, backendData, sortBy) {
         const groupPresentation = buildGroupPresentation(comparisonType, backendData);
         const groupMeansHuman = {};
@@ -455,7 +587,8 @@ document.addEventListener('DOMContentLoaded', function() {
             ? {
                 groupOrder: backendData.groups.slice(),
                 colorMap: { Summary: (comparisonConfig.colorMap && comparisonConfig.colorMap.Summary) || '#444' },
-                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` }
+                traceNameMap: { Summary: `Summary (${backendData.groupCounts?.Summary || 0})` },
+                displayNameMap: { Summary: 'Summary' }
             }
             : buildGroupPresentation(comparisonType, backendData);
 
@@ -529,6 +662,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderBoxPlot(backendData, comparisonType, sortBy) {
         const comparisonConfig = getComparisonConfig(comparisonType);
+        const legendTitle = getLegendTitleForComparison(comparisonType);
 
         if (comparisonType === 'human_ai') {
             const combined = buildValueRows(
@@ -548,11 +682,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 'Numerical_Score',
                 'Type',
                 {
-                    title: 'Acceptability of Human vs AI Alterations',
+                    title: getAlterationPlotTitle('acceptabilityHumanVsAI'),
                     colorMap: comparisonConfig.colorMap,
                     categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
                     xaxisTitle: 'Type of Alteration',
-                    yaxisTitle: 'Acceptability'
+                    yaxisTitle: 'Acceptability',
+                    legendTitle,
+                    hoverLabel: 'Type',
+                    hoverNameMap: { Human: 'Human', AI: 'AI' }
                 },
                 'human-plot'
             );
@@ -574,7 +711,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 'Numerical_Score',
                 'Type',
                 {
-                    title: 'Overall Acceptability Summary',
+                    title: getAlterationPlotTitle('acceptabilitySummary'),
                     colorMap: comparisonConfig.colorMap || { [groupName]: '#444' },
                     categoryOrders: { 'Feature_Name': featureOrder, 'Type': [groupName] },
                     xaxisTitle: 'Type of Alteration',
@@ -588,7 +725,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const { groupOrder, groupKey, colorMap, traceNameMap } = buildGroupPresentation(comparisonType, backendData);
+        const { groupOrder, groupKey, colorMap, traceNameMap, displayNameMap } = buildGroupPresentation(comparisonType, backendData);
         let meltedHuman = buildValueRows(
             backendData.groups,
             backendData.features,
@@ -613,15 +750,18 @@ document.addEventListener('DOMContentLoaded', function() {
             'Feature_Name',
             'Numerical_Score',
             groupKey,
-            {
-                title: 'Acceptability of Human Alterations',
-                colorMap: colorMap,
-                categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                xaxisTitle: 'Type of Alteration',
-                yaxisTitle: 'Acceptability',
-                legendOrder: boxPlotLegendOrder,
-                traceNameMap: traceNameMap
-            },
+                {
+                    title: getAlterationPlotTitle('acceptabilityHumanByComparison', getComparisonLabel(comparisonType)),
+                    colorMap: colorMap,
+                    categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Acceptability',
+                    legendTitle,
+                    legendOrder: boxPlotLegendOrder,
+                    traceNameMap: traceNameMap,
+                    hoverLabel: legendTitle,
+                    hoverNameMap: displayNameMap
+                },
             'human-plot'
         );
         makeBoxPlot(
@@ -629,15 +769,18 @@ document.addEventListener('DOMContentLoaded', function() {
             'Feature_Name',
             'Numerical_Score',
             groupKey,
-            {
-                title: 'Acceptability of AI Alterations',
-                colorMap: colorMap,
-                categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                xaxisTitle: 'Type of Alteration',
-                yaxisTitle: 'Acceptability',
-                legendOrder: boxPlotLegendOrder,
-                traceNameMap: traceNameMap
-            },
+                {
+                    title: getAlterationPlotTitle('acceptabilityAIByComparison', getComparisonLabel(comparisonType)),
+                    colorMap: colorMap,
+                    categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Acceptability',
+                    legendTitle,
+                    legendOrder: boxPlotLegendOrder,
+                    traceNameMap: traceNameMap,
+                    hoverLabel: legendTitle,
+                    hoverNameMap: displayNameMap
+                },
             'ai-plot'
         );
         document.getElementById('human-plot').style.display = 'block';
@@ -646,6 +789,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderSlopeChart(backendData, comparisonType, sortBy) {
         const comparisonConfig = getComparisonConfig(comparisonType);
+        const legendTitle = getLegendTitleForComparison(comparisonType);
 
         if (comparisonType === 'human_ai') {
             const humanMeans = backendData.meansHuman['Human'] || {};
@@ -662,8 +806,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 comparisonConfig.colorMap,
                 ['Human', 'AI'],
                 {
-                    title: 'Mean Acceptability (Human \u25cf vs AI \u25cb, individual responses shown as gray lines)',
-                    legendTitle: 'Type',
+                    title: getAlterationPlotTitle('meanHumanVsAI'),
+                    legendTitle,
+                    hoverLabel: 'Type',
+                    hoverNameMap: { Human: 'Human', AI: 'AI' },
                     groupOrder: ['Human', 'AI'],
                     isGrouped: false,
                     pairedData: backendData.pairedData || []
@@ -686,7 +832,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 summary.colorMap,
                 [summary.traceName],
                 {
-                    title: 'Overall Mean Acceptability Summary',
+                    title: getAlterationPlotTitle('meanSummary'),
                     legendTitle: 'Summary',
                     traceNameMap: { [summary.groupName]: summary.traceName },
                     groupOrder: [summary.groupName],
@@ -704,6 +850,7 @@ document.addEventListener('DOMContentLoaded', function() {
             groupOrder,
             colorMap,
             traceNameMap,
+            displayNameMap,
             groupMeansHuman,
             groupMeansAI,
             featureOrder,
@@ -716,12 +863,14 @@ document.addEventListener('DOMContentLoaded', function() {
             featureOrder,
             colorMap,
             legendOrder,
-            {
-                title: 'Mean Acceptability (Human \u25cf vs AI \u25cb)',
-                legendTitle: 'Group',
-                traceNameMap: traceNameMap,
-                groupOrder: groupOrder,
-                isGrouped: true
+                {
+                    title: getAlterationPlotTitle('meanByComparison', getComparisonLabel(comparisonType)),
+                    legendTitle,
+                    traceNameMap: traceNameMap,
+                    hoverLabel: legendTitle,
+                    hoverNameMap: displayNameMap,
+                    groupOrder: groupOrder,
+                    isGrouped: true
             },
             'human-plot'
         );
@@ -731,6 +880,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderLineChart(backendData, comparisonType, sortBy) {
         const comparisonConfig = getComparisonConfig(comparisonType);
+        const legendTitle = getLegendTitleForComparison(comparisonType);
 
         if (comparisonType === 'human_ai') {
             const humanMeans = backendData.means['Human'] || {};
@@ -749,9 +899,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 comparisonConfig.colorMap,
                 [traceNameMap.Human, traceNameMap.AI],
                 {
-                    title: 'Mean Acceptability with \u00b11 Stdev Bands (Human \u25cf vs AI \u25cb)',
-                    legendTitle: 'Type',
+                    title: getAlterationPlotTitle('meanHumanVsAI'),
+                    legendTitle,
                     traceNameMap: traceNameMap,
+                    hoverLabel: 'Type',
+                    hoverNameMap: { Human: 'Human', AI: 'AI' },
                     groupOrder: ['Human', 'AI'],
                     stdDevDict: { Human: humanStds, AI: aiStds }
                 },
@@ -773,7 +925,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 summary.colorMap,
                 [summary.traceName],
                 {
-                    title: 'Overall Mean Acceptability Summary',
+                    title: getAlterationPlotTitle('meanSummary'),
                     legendTitle: 'Summary',
                     traceNameMap: { [summary.groupName]: summary.traceName },
                     groupOrder: [summary.groupName],
@@ -791,6 +943,7 @@ document.addEventListener('DOMContentLoaded', function() {
             groupOrder,
             colorMap,
             traceNameMap,
+            displayNameMap,
             groupMeansHuman,
             groupMeansAI,
             groupStdsHuman,
@@ -804,12 +957,14 @@ document.addEventListener('DOMContentLoaded', function() {
             featureOrder,
             colorMap,
             legendOrder,
-            {
-                title: 'Mean Acceptability for Human Alteration (\u00b11 Stdev Bands)',
-                legendTitle: 'Group',
-                traceNameMap: traceNameMap,
-                groupOrder: groupOrder,
-                isGrouped: true,
+                {
+                    title: getAlterationPlotTitle('meanHuman'),
+                    legendTitle,
+                    traceNameMap: traceNameMap,
+                    hoverLabel: legendTitle,
+                    hoverNameMap: displayNameMap,
+                    groupOrder: groupOrder,
+                    isGrouped: true,
                 stdDevDict: groupStdsHuman
             },
             'human-plot'
@@ -819,14 +974,166 @@ document.addEventListener('DOMContentLoaded', function() {
             featureOrder,
             colorMap,
             legendOrder,
-            {
-                title: 'Mean Acceptability for AI Alteration (\u00b11 Stdev Bands)',
-                legendTitle: 'Group',
-                forceAIStyle: true,
-                traceNameMap: traceNameMap,
-                groupOrder: groupOrder,
+                {
+                    title: getAlterationPlotTitle('meanAI'),
+                    legendTitle,
+                    forceAIStyle: true,
+                    traceNameMap: traceNameMap,
+                    hoverLabel: legendTitle,
+                    hoverNameMap: displayNameMap,
+                    groupOrder: groupOrder,
                 stdDevDict: groupStdsAI
             },
+            'ai-plot'
+        );
+        document.getElementById('human-plot').style.display = 'block';
+        document.getElementById('ai-plot').style.display = 'block';
+    }
+
+    function renderStackedBarChart(backendData, comparisonType, sortBy) {
+        const comparisonLabel = getComparisonLabel(comparisonType);
+        const selectedGroups = new Set(selectedStackedGroups);
+        const getVisibleGroupOrder = groups => (groups || []).filter(group => selectedGroups.has(group));
+
+        if (comparisonType === 'human_ai') {
+            const visibleGroups = getVisibleGroupOrder(backendData.groups);
+            const allRows = buildValueRows(
+                backendData.groups,
+                backendData.features,
+                (group, feature) => ((backendData.data[group] && backendData.data[group][feature]) || []),
+                ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Type: group })
+            );
+            const combined = allRows.filter(row => selectedGroups.has(row.Type));
+            if (!combined.length) {
+                renderStackedEmptyState('Select at least one variable to visualize.', 'human-plot');
+                document.getElementById('human-plot').style.display = 'block';
+                document.getElementById('ai-plot').style.display = 'none';
+                return;
+            }
+            const featureOrder = getFeatureSortOrder(
+                sortBy,
+                allRows.filter(row => row.Type === 'Human'),
+                allRows.filter(row => row.Type === 'AI')
+            );
+            const traceNameMap = {
+                Human: `Human (${backendData.groupCounts?.Human || 0})`,
+                AI: `AI (${backendData.groupCounts?.AI || 0})`
+            };
+
+            makeStackedBarChart(
+                combined,
+                'Feature_Name',
+                'Numerical_Score',
+                'Type',
+                {
+                    title: getAlterationPlotTitle('distributionHumanVsAI'),
+                    categoryOrders: { Feature_Name: featureOrder, Type: visibleGroups },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Responses (%)',
+                    traceNameMap,
+                    groupLabelMap: { Human: 'Human', AI: 'AI' },
+                    groupHoverLabel: 'Type'
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
+        }
+
+        if (comparisonType === 'summary') {
+            const groupName = backendData.groups[0] || 'Summary';
+            const visibleGroups = getVisibleGroupOrder([groupName]);
+            const allRows = buildValueRows(
+                [groupName],
+                backendData.features,
+                (group, feature) => ((backendData.data[group] && backendData.data[group][feature]) || []),
+                ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Type: group })
+            );
+            const combined = allRows.filter(row => selectedGroups.has(row.Type));
+            if (!combined.length) {
+                renderStackedEmptyState('Select at least one variable to visualize.', 'human-plot');
+                document.getElementById('human-plot').style.display = 'block';
+                document.getElementById('ai-plot').style.display = 'none';
+                return;
+            }
+            const featureOrder = getFeatureSortOrder(sortBy, allRows, allRows);
+
+            makeStackedBarChart(
+                combined,
+                'Feature_Name',
+                'Numerical_Score',
+                'Type',
+                {
+                    title: getAlterationPlotTitle('distributionSummary'),
+                    categoryOrders: { Feature_Name: featureOrder, Type: visibleGroups },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Responses (%)',
+                    traceNameMap: { [groupName]: `${groupName} (${backendData.groupCounts?.[groupName] || 0})` },
+                    groupLabelMap: { [groupName]: groupName }
+                },
+                'human-plot'
+            );
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'none';
+            return;
+        }
+
+        const { rawGroups, groupOrder, groupKey, traceNameMap, displayNameMap } = buildGroupPresentation(comparisonType, backendData);
+        const visibleGroupOrder = getVisibleGroupOrder(groupOrder);
+        const allHumanRows = buildValueRows(
+            rawGroups,
+            backendData.features,
+            (group, feature) => ((backendData.data[group] && backendData.data[group][feature]) || []),
+            ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Group: group })
+        );
+        const allAIRows = buildValueRows(
+            rawGroups,
+            backendData.features,
+            (group, feature) => ((backendData.data[`${group}__AI`] && backendData.data[`${group}__AI`][feature]) || []),
+            ({ group, feature, score }) => ({ Feature_Name: feature, Numerical_Score: score, Group: group })
+        );
+        const combinedHuman = allHumanRows.filter(row => selectedGroups.has(row.Group));
+        const combinedAI = allAIRows.filter(row => selectedGroups.has(row.Group));
+        if (!combinedHuman.length && !combinedAI.length) {
+            renderStackedEmptyState('Select at least one variable to visualize.', 'human-plot');
+            renderStackedEmptyState('Select at least one variable to visualize.', 'ai-plot');
+            document.getElementById('human-plot').style.display = 'block';
+            document.getElementById('ai-plot').style.display = 'block';
+            return;
+        }
+        const featureOrder = getFeatureSortOrder(sortBy, allHumanRows, allAIRows);
+
+        makeStackedBarChart(
+            combinedHuman,
+            'Feature_Name',
+            'Numerical_Score',
+            groupKey,
+                {
+                    title: getAlterationPlotTitle('distributionHumanByComparison', comparisonLabel),
+                    categoryOrders: { Feature_Name: featureOrder, [groupKey]: visibleGroupOrder },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Responses (%)',
+                    traceNameMap,
+                    groupLabelMap: displayNameMap,
+                    groupHoverLabel: comparisonLabel
+                },
+            'human-plot'
+        );
+        makeStackedBarChart(
+            combinedAI,
+            'Feature_Name',
+            'Numerical_Score',
+            groupKey,
+                {
+                    title: getAlterationPlotTitle('distributionAIByComparison', comparisonLabel),
+                    categoryOrders: { Feature_Name: featureOrder, [groupKey]: visibleGroupOrder },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Responses (%)',
+                    traceNameMap,
+                    groupLabelMap: displayNameMap,
+                    groupHoverLabel: comparisonLabel
+                },
             'ai-plot'
         );
         document.getElementById('human-plot').style.display = 'block';
@@ -836,6 +1143,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderSwarmPlot(backendData, comparisonType, sortBy) {
         const comparisonLabel = getComparisonLabel(comparisonType);
         const comparisonConfig = getComparisonConfig(comparisonType);
+        const legendTitle = getLegendTitleForComparison(comparisonType);
 
         if (comparisonType === 'human_ai') {
             const combined = buildValueRows(
@@ -855,12 +1163,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 'Numerical_Score',
                 'Type',
                 {
-                    title: 'Swarm Plot: Acceptability of Human vs AI Alterations',
+                    title: getAlterationPlotTitle('acceptabilityHumanVsAI'),
                     colorMap: comparisonConfig.colorMap,
                     categoryOrders: { 'Feature_Name': featureOrder, 'Type': backendData.groups },
                     xaxisTitle: 'Type of Alteration',
                     yaxisTitle: 'Acceptability',
-                    traceNameMap: { Human: 'Human', AI: 'AI' }
+                    legendTitle,
+                    traceNameMap: { Human: 'Human', AI: 'AI' },
+                    hoverLabel: 'Type',
+                    hoverNameMap: { Human: 'Human', AI: 'AI' }
                 },
                 'human-plot'
             );
@@ -882,7 +1193,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 'Numerical_Score',
                 'Type',
                 {
-                    title: 'Overall Acceptability Summary',
+                    title: getAlterationPlotTitle('acceptabilitySummary'),
                     colorMap: { [groupName]: comparisonConfig.colorMap ? comparisonConfig.colorMap[groupName] : '#444' },
                     categoryOrders: { 'Feature_Name': featureOrder, 'Type': [groupName] },
                     xaxisTitle: 'Type of Alteration',
@@ -897,7 +1208,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const { rawGroups, groupOrder, groupKey, colorMap, traceNameMap } = buildGroupPresentation(comparisonType, backendData);
+        const { rawGroups, groupOrder, groupKey, colorMap, traceNameMap, displayNameMap } = buildGroupPresentation(comparisonType, backendData);
         const combinedHuman = buildValueRows(
             rawGroups,
             backendData.features,
@@ -917,14 +1228,17 @@ document.addEventListener('DOMContentLoaded', function() {
             'Feature_Name',
             'Numerical_Score',
             groupKey,
-            {
-                title: `Swarm Plot: Acceptability of Human Alterations by ${comparisonLabel}`,
-                colorMap: colorMap || generateColorScale(groupOrder),
-                categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                xaxisTitle: 'Type of Alteration',
-                yaxisTitle: 'Acceptability',
-                traceNameMap: traceNameMap
-            },
+                {
+                    title: getAlterationPlotTitle('acceptabilityHumanByComparison', comparisonLabel),
+                    colorMap: colorMap || generateColorScale(groupOrder),
+                    categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Acceptability',
+                    legendTitle,
+                    traceNameMap: traceNameMap,
+                    hoverLabel: legendTitle,
+                    hoverNameMap: displayNameMap
+                },
             'human-plot'
         );
         makeSwarmPlot(
@@ -932,14 +1246,17 @@ document.addEventListener('DOMContentLoaded', function() {
             'Feature_Name',
             'Numerical_Score',
             groupKey,
-            {
-                title: `Swarm Plot: Acceptability of AI Alterations by ${comparisonLabel}`,
-                colorMap: colorMap || generateColorScale(groupOrder),
-                categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
-                xaxisTitle: 'Type of Alteration',
-                yaxisTitle: 'Acceptability',
-                traceNameMap: traceNameMap
-            },
+                {
+                    title: getAlterationPlotTitle('acceptabilityAIByComparison', comparisonLabel),
+                    colorMap: colorMap || generateColorScale(groupOrder),
+                    categoryOrders: { 'Feature_Name': featureOrder, [groupKey]: groupOrder },
+                    xaxisTitle: 'Type of Alteration',
+                    yaxisTitle: 'Acceptability',
+                    legendTitle,
+                    traceNameMap: traceNameMap,
+                    hoverLabel: legendTitle,
+                    hoverNameMap: displayNameMap
+                },
             'ai-plot'
         );
         document.getElementById('human-plot').style.display = 'block';
@@ -978,12 +1295,19 @@ document.addEventListener('DOMContentLoaded', function() {
         container.innerHTML = `<div style="color:red;text-align:center;padding:2em;">${message}</div>`;
     }
 
+    function renderStackedEmptyState(message, plotId) {
+        const plot = document.getElementById(plotId);
+        if (!plot) return;
+        plot.innerHTML = `<div style="text-align:center;padding:2em;color:#666;">${message}</div>`;
+    }
+
     function getContextPlotTitle(feature, viewConfig) {
         const featureLabel = getFeatureLabel(feature);
+        const prefix = viewConfig.plotTitlePrefix || viewConfig.label || 'Context';
         if (featureLabel === feature) {
-            return feature;
+            return `${prefix}: ${feature}`;
         }
-        return `${feature}: ${featureLabel}`;
+        return `${prefix}: ${featureLabel}`;
     }
 
     function getContextViewsToRender(contextView) {
@@ -1007,6 +1331,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderContextBoxPlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
+        const legendTitle = getLegendTitleForComparison(comparisonType);
         renderContextPlotCollection({
             backendData,
             comparisonType,
@@ -1028,8 +1353,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         yaxisTitle: '',
                         xTickAngle: 15,
                         responseScale: viewConfig.responseScale,
+                        legendTitle,
                         legendOrder,
                         traceNameMap: groupPresentation.traceNameMap,
+                        hoverLabel: legendTitle,
+                        hoverNameMap: groupPresentation.displayNameMap,
                         showLegend: !isSummary
                     },
                     plotId
@@ -1049,8 +1377,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         yaxisTitle: '',
                         xTickAngle: 15,
                         responseScale: viewConfig.responseScale,
+                        legendTitle,
                         legendOrder,
                         traceNameMap: groupPresentation.traceNameMap,
+                        hoverLabel: legendTitle,
+                        hoverNameMap: groupPresentation.displayNameMap,
                         showLegend: !isSummary && featureIndex === 0
                     },
                     plotId
@@ -1060,6 +1391,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderContextLinePlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
+        const legendTitle = getLegendTitleForComparison(comparisonType);
         renderContextPlotCollection({
             backendData,
             comparisonType,
@@ -1082,8 +1414,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     legendOrder,
                     {
                         title: getCombinedContextPlotTitle(viewConfig),
-                        legendTitle: isSummary ? 'Summary' : 'Group',
+                        legendTitle,
                         traceNameMap: groupPresentation.traceNameMap,
+                        hoverLabel: legendTitle,
+                        hoverNameMap: groupPresentation.displayNameMap,
                         groupOrder: groupPresentation.groupOrder,
                         stdDevDict: stds,
                         xaxisTitle: '',
@@ -1110,8 +1444,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     legendOrder,
                     {
                         title: getContextPlotTitle(feature, viewConfig),
-                        legendTitle: isSummary ? 'Summary' : 'Group',
+                        legendTitle,
                         traceNameMap: groupPresentation.traceNameMap,
+                        hoverLabel: legendTitle,
+                        hoverNameMap: groupPresentation.displayNameMap,
                         groupOrder: groupPresentation.groupOrder,
                         stdDevDict: stds,
                         xaxisTitle: '',
@@ -1127,6 +1463,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderContextSwarmPlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
+        const legendTitle = getLegendTitleForComparison(comparisonType);
         renderContextPlotCollection({
             backendData,
             comparisonType,
@@ -1148,7 +1485,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         yaxisTitle: '',
                         xTickAngle: 15,
                         responseScale: viewConfig.responseScale,
+                        legendTitle,
                         traceNameMap: groupPresentation.traceNameMap,
+                        hoverLabel: legendTitle,
+                        hoverNameMap: groupPresentation.displayNameMap,
                         legendOrder,
                         showLegend: !isSummary
                     },
@@ -1169,9 +1509,69 @@ document.addEventListener('DOMContentLoaded', function() {
                         yaxisTitle: '',
                         xTickAngle: 15,
                         responseScale: viewConfig.responseScale,
+                        legendTitle,
                         traceNameMap: groupPresentation.traceNameMap,
+                        hoverLabel: legendTitle,
+                        hoverNameMap: groupPresentation.displayNameMap,
                         legendOrder,
                         showLegend: !isSummary && featureIndex === 0
+                    },
+                    plotId
+                );
+            }
+        });
+    }
+
+    function renderContextStackedBarPlots(backendData, comparisonType, sortBy, contextView, renderOptions = {}) {
+        const selectedGroups = new Set(selectedStackedGroups);
+        const getVisibleGroupOrder = groups => (groups || []).filter(group => selectedGroups.has(group));
+        renderContextPlotCollection({
+            backendData,
+            comparisonType,
+            sortBy,
+            contextView,
+            renderOptions,
+            buildRows: buildContextRows,
+            renderCombinedPlot: ({ rows, featureOrder, viewConfig, groupPresentation, plotId }) => {
+                const filteredRows = rows.filter(row => selectedGroups.has(row.Group));
+                makeStackedBarChart(
+                    filteredRows,
+                    'Feature_Name',
+                    'Numerical_Score',
+                    'Group',
+                    {
+                        title: getCombinedContextPlotTitle(viewConfig),
+                        categoryOrders: { Feature_Name: featureOrder, Group: getVisibleGroupOrder(groupPresentation.groupOrder) },
+                        xaxisTitle: '',
+                        yaxisTitle: 'Responses (%)',
+                        xTickAngle: 15,
+                        responseScale: viewConfig.responseScale,
+                        traceNameMap: groupPresentation.traceNameMap,
+                        groupLabelMap: groupPresentation.displayNameMap,
+                        groupHoverLabel: getLegendTitleForComparison(comparisonType),
+                        showLegend: true
+                    },
+                    plotId
+                );
+            },
+            renderFeaturePlot: ({ feature, featureRows, featureIndex, viewConfig, groupPresentation, plotId }) => {
+                const filteredRows = featureRows.filter(row => selectedGroups.has(row.Group));
+                makeStackedBarChart(
+                    filteredRows,
+                    'Feature_Name',
+                    'Numerical_Score',
+                    'Group',
+                    {
+                        title: getContextPlotTitle(feature, viewConfig),
+                        categoryOrders: { Feature_Name: [feature], Group: getVisibleGroupOrder(groupPresentation.groupOrder) },
+                        xaxisTitle: '',
+                        yaxisTitle: 'Responses (%)',
+                        xTickAngle: 15,
+                        responseScale: viewConfig.responseScale,
+                        traceNameMap: groupPresentation.traceNameMap,
+                        groupLabelMap: groupPresentation.displayNameMap,
+                        groupHoverLabel: getLegendTitleForComparison(comparisonType),
+                        showLegend: featureIndex === 0
                     },
                     plotId
                 );
@@ -1193,6 +1593,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const chartType = document.getElementById('chart-type').value;
         if (chartType === 'box') {
             renderContextBoxPlots(backendData, comparisonType, sortBy, contextView, renderOptions);
+        } else if (chartType === 'stacked') {
+            renderContextStackedBarPlots(backendData, comparisonType, sortBy, contextView, renderOptions);
         } else if (chartType === 'line') {
             renderContextLinePlots(backendData, comparisonType, sortBy, contextView, renderOptions);
         } else if (chartType === 'swarm') {
@@ -1227,7 +1629,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function updateControlAvailability(tabName = activeTab) {
+    function updateControlAvailability(tabName = activeTab, preferredControl = null) {
         const comparisonSelect = document.getElementById('comparison-type');
         const chartTypeSelect = document.getElementById('chart-type');
         const sortBySelect = document.getElementById('sort-by');
@@ -1239,35 +1641,46 @@ document.addEventListener('DOMContentLoaded', function() {
         const chartType = chartTypeSelect ? chartTypeSelect.value : null;
         const comparisonType = comparisonSelect ? comparisonSelect.value : null;
         const disableHumanAISorts = tabName === 'contexts' || comparisonType === 'summary';
-
         const disableHumanAI = tabName === 'contexts';
-        if (humanAIOption) {
-            humanAIOption.disabled = disableHumanAI;
-            if (disableHumanAI) {
-                humanAIOption.setAttribute('aria-disabled', 'true');
+        const disableSummary = tabName === 'alterations' && chartType === 'slope';
+        const disableSlope = tabName === 'contexts' || comparisonType === 'summary';
+
+        function setOptionDisabled(option, isDisabled) {
+            if (!option) return;
+            option.disabled = isDisabled;
+            if (isDisabled) {
+                option.setAttribute('aria-disabled', 'true');
             } else {
-                humanAIOption.removeAttribute('aria-disabled');
+                option.removeAttribute('aria-disabled');
             }
         }
 
-        const disableSummary = false;
-        if (summaryOption) {
-            summaryOption.disabled = disableSummary;
-            if (disableSummary) {
-                summaryOption.setAttribute('aria-disabled', 'true');
-            } else {
-                summaryOption.removeAttribute('aria-disabled');
+        setOptionDisabled(humanAIOption, disableHumanAI);
+        setOptionDisabled(summaryOption, disableSummary);
+        setOptionDisabled(slopeOption, disableSlope);
+
+        function selectFirstEnabled(selectElement) {
+            const firstEnabledOption = selectElement.querySelector('option:not([disabled])');
+            if (firstEnabledOption) {
+                selectElement.value = firstEnabledOption.value;
+                return true;
             }
+            return false;
         }
 
-        const disableSlope = tabName === 'contexts';
-        if (slopeOption) {
-            slopeOption.disabled = disableSlope;
-            if (disableSlope) {
-                slopeOption.setAttribute('aria-disabled', 'true');
-            } else {
-                slopeOption.removeAttribute('aria-disabled');
-            }
+        const selectedChartTypeOption = chartTypeSelect.querySelector(`option[value="${chartTypeSelect.value}"]`);
+        const selectedComparisonOption = comparisonSelect.querySelector(`option[value="${comparisonSelect.value}"]`);
+        const selectedChartTypeDisabled = selectedChartTypeOption && selectedChartTypeOption.disabled;
+        const selectedComparisonDisabled = selectedComparisonOption && selectedComparisonOption.disabled;
+
+        if (preferredControl === 'comparison' && selectedChartTypeDisabled && selectFirstEnabled(chartTypeSelect)) {
+            updateControlAvailability(tabName);
+            return;
+        }
+
+        if (preferredControl === 'chart' && selectedComparisonDisabled && selectFirstEnabled(comparisonSelect)) {
+            updateControlAvailability(tabName);
+            return;
         }
 
         const sortOptionUpdates = [
@@ -1292,20 +1705,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        const selectedChartTypeOption = chartTypeSelect.querySelector(`option[value="${chartTypeSelect.value}"]`);
-        if (selectedChartTypeOption && selectedChartTypeOption.disabled) {
-            const firstEnabledChartType = chartTypeSelect.querySelector('option:not([disabled])');
-            if (firstEnabledChartType) {
-                chartTypeSelect.value = firstEnabledChartType.value;
-            }
+        if (selectedChartTypeDisabled && selectFirstEnabled(chartTypeSelect)) {
+            updateControlAvailability(tabName);
+            return;
         }
 
-        const selectedOption = comparisonSelect.querySelector(`option[value="${comparisonSelect.value}"]`);
-        if (selectedOption && selectedOption.disabled) {
-            const firstEnabledOption = comparisonSelect.querySelector('option:not([disabled])');
-            if (firstEnabledOption) {
-                comparisonSelect.value = firstEnabledOption.value;
-            }
+        if (selectedComparisonDisabled && selectFirstEnabled(comparisonSelect)) {
+            updateControlAvailability(tabName);
+            return;
         }
 
         const selectedSortOption = sortBySelect.querySelector(`option[value="${sortBySelect.value}"]`);
@@ -1317,9 +1724,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Main plot update logic ---
     function updatePlots() {
         const { chartType, comparisonType, sortBy, contextView } = getSelections();
+        renderStackedFilterControls();
 
         if (isContextsTab()) {
             try {
+                if (chartType === 'stacked' && comparisonType !== 'summary' && selectedStackedGroups.size === 0) {
+                    renderContextError('Select at least one variable to visualize.');
+                    return;
+                }
                 renderContextPlots(backendData, comparisonType, sortBy, contextView);
                 resizeVisiblePlots();
             } catch (err) {
@@ -1330,7 +1742,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let showHumanPlot = true;
         let showAIPlot = false;
-        if (chartType === 'box' || chartType === 'line' || chartType === 'swarm') {
+        if (chartType === 'box' || chartType === 'stacked' || chartType === 'line' || chartType === 'swarm') {
             showAIPlot = comparisonType !== 'human_ai' && comparisonType !== 'summary';
         }
         setPlotVisibility(showHumanPlot, showAIPlot);
@@ -1343,8 +1755,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
+            if (chartType === 'stacked' && comparisonType !== 'summary' && selectedStackedGroups.size === 0) {
+                renderStackedEmptyState('Select at least one variable to visualize.', 'human-plot');
+                document.getElementById('human-plot').style.display = 'block';
+                if (comparisonType !== 'human_ai' && comparisonType !== 'summary') {
+                    renderStackedEmptyState('Select at least one variable to visualize.', 'ai-plot');
+                    document.getElementById('ai-plot').style.display = 'block';
+                } else {
+                    document.getElementById('ai-plot').style.display = 'none';
+                }
+                return;
+            }
+
             if (chartType === 'box') {
                 renderBoxPlot(backendData, comparisonType, sortBy);
+            } else if (chartType === 'stacked') {
+                renderStackedBarChart(backendData, comparisonType, sortBy);
             } else if (chartType === 'slope') {
                 renderSlopeChart(backendData, comparisonType, sortBy);
             } else if (chartType === 'line') {
@@ -1390,6 +1816,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 validateBackendDataShape(data, chartType, activeTab);
                 backendData = data;
             }
+            syncStackedFilterState(getAvailableStackedGroups(), activeTab, comparisonType);
             updatePlots();
         } catch (err) {
             if (isContextsTab()) {
@@ -1416,15 +1843,40 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Only fetch data when chart-type or comparison-type changes
     document.getElementById('chart-type').addEventListener('change', function() {
-        updateControlAvailability();
+        updateControlAvailability(activeTab, 'chart');
         refreshBackendData();
     });
-    document.getElementById('comparison-type').addEventListener('change', refreshBackendData);
+    document.getElementById('comparison-type').addEventListener('change', function() {
+        updateControlAvailability(activeTab, 'comparison');
+        refreshBackendData();
+    });
     // Only re-sort and re-plot when sort-by changes (no backend call)
     document.getElementById('sort-by').addEventListener('change', function() {
         updatePlots();
     });
     document.getElementById('context-view').addEventListener('change', refreshBackendData);
+    document.getElementById('stacked-filter-controls-alterations').addEventListener('change', function(event) {
+        if (!event.target.classList.contains('stacked-filter-checkbox')) return;
+        const value = event.target.value;
+        if (event.target.checked) {
+            selectedStackedGroups.add(value);
+        } else {
+            selectedStackedGroups.delete(value);
+        }
+        renderStackedFilterControls();
+        updatePlots();
+    });
+    document.getElementById('stacked-filter-controls-contexts').addEventListener('change', function(event) {
+        if (!event.target.classList.contains('stacked-filter-checkbox')) return;
+        const value = event.target.value;
+        if (event.target.checked) {
+            selectedStackedGroups.add(value);
+        } else {
+            selectedStackedGroups.delete(value);
+        }
+        renderStackedFilterControls();
+        updatePlots();
+    });
 
     // Initial tab state and load
     switchTab('alterations');
