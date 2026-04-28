@@ -153,7 +153,7 @@ function getComparisonColumn(comparisonType) {
  * Returns:
  *   For 'box': { features, groups, data, humanGroups, aiGroups, groupCounts }
  *   For 'stacked': { features, groups, data, humanGroups, aiGroups, groupCounts }
- *   For 'line': { features, groups, means, meansHuman, meansAI, stdsHuman, stdsAI, groupCounts }
+ *   For 'line': { features, groups, means, meansHuman, meansAI, stdsHuman, stdsAI, outliers, outliersHuman, outliersAI, groupCounts }
  *   For 'slope': { features, groups, meansHuman, meansAI, groupCounts, pairedData }
  *   For 'swarm': { features, groups, data, dataHuman, dataAI, humanGroups, aiGroups, groupCounts }
  *
@@ -347,16 +347,21 @@ function aggregateContextLineChart(data, comparisonType, view) {
     groups,
     means: {},
     stds: {},
+    outliers: {},
     groupCounts
   };
 
   groups.forEach(group => {
     output.means[group] = {};
     output.stds[group] = {};
+    output.outliers[group] = {};
     viewConfig.features.forEach(feature => {
       const scores = scoreMap[group][feature];
-      output.means[group][feature] = calculateMean(scores);
-      output.stds[group][feature] = calculateStdDev(scores);
+      const mean = calculateMean(scores);
+      const std = calculateStdDev(scores);
+      output.means[group][feature] = mean;
+      output.stds[group][feature] = std;
+      output.outliers[group][feature] = findOutlierScores(scores, mean, std);
     });
   });
 
@@ -473,6 +478,9 @@ function aggregateLineChart(data, comparisonType) {
     meansAI: {},
     stdsHuman: {},
     stdsAI: {},
+    outliers: {},
+    outliersHuman: {},
+    outliersAI: {},
     groupCounts
   };
 
@@ -485,30 +493,48 @@ function aggregateLineChart(data, comparisonType) {
     output.meansAI[group] = {};
     output.stdsHuman[group] = {};
     output.stdsAI[group] = {};
+    output.outliers[group] = {};
+    output.outliersHuman[group] = {};
+    output.outliersAI[group] = {};
     FEATURES.forEach(feat => {
       const scores = scoreMap[group][feat];
       if (comparisonType === 'summary') {
         const combined = scores.human.concat(scores.ai);
-        output.means[group][feat] = calculateMean(combined);
-        output.meansHuman[group][feat] = calculateMean(combined);
-        output.stdsHuman[group][feat] = calculateStdDev(combined);
-        output.meansAI[group][feat] = calculateMean(combined);
-        output.stdsAI[group][feat] = calculateStdDev(combined);
+        const mean = calculateMean(combined);
+        const std = calculateStdDev(combined);
+        output.means[group][feat] = mean;
+        output.meansHuman[group][feat] = mean;
+        output.stdsHuman[group][feat] = std;
+        output.meansAI[group][feat] = mean;
+        output.stdsAI[group][feat] = std;
+        output.outliers[group][feat] = findOutlierScores(combined, mean, std);
       } else if (comparisonType === 'human_ai') {
         if (group === 'Human') {
-          output.meansHuman[group][feat] = calculateMean(scores.human);
-          output.stdsHuman[group][feat] = calculateStdDev(scores.human);
-          output.means[group][feat] = output.meansHuman[group][feat];
+          const mean = calculateMean(scores.human);
+          const std = calculateStdDev(scores.human);
+          output.meansHuman[group][feat] = mean;
+          output.stdsHuman[group][feat] = std;
+          output.means[group][feat] = mean;
+          output.outliers[group][feat] = findOutlierScores(scores.human, mean, std);
         } else {
-          output.meansAI[group][feat] = calculateMean(scores.ai);
-          output.stdsAI[group][feat] = calculateStdDev(scores.ai);
-          output.means[group][feat] = output.meansAI[group][feat];
+          const mean = calculateMean(scores.ai);
+          const std = calculateStdDev(scores.ai);
+          output.meansAI[group][feat] = mean;
+          output.stdsAI[group][feat] = std;
+          output.means[group][feat] = mean;
+          output.outliers[group][feat] = findOutlierScores(scores.ai, mean, std);
         }
       } else {
-        output.meansHuman[group][feat] = calculateMean(scores.human);
-        output.stdsHuman[group][feat] = calculateStdDev(scores.human);
-        output.meansAI[group][feat] = calculateMean(scores.ai);
-        output.stdsAI[group][feat] = calculateStdDev(scores.ai);
+        const humanMean = calculateMean(scores.human);
+        const humanStd = calculateStdDev(scores.human);
+        const aiMean = calculateMean(scores.ai);
+        const aiStd = calculateStdDev(scores.ai);
+        output.meansHuman[group][feat] = humanMean;
+        output.stdsHuman[group][feat] = humanStd;
+        output.meansAI[group][feat] = aiMean;
+        output.stdsAI[group][feat] = aiStd;
+        output.outliersHuman[group][feat] = findOutlierScores(scores.human, humanMean, humanStd);
+        output.outliersAI[group][feat] = findOutlierScores(scores.ai, aiMean, aiStd);
       }
     });
   });
@@ -575,6 +601,15 @@ function calculateStdDev(values) {
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
   return Math.sqrt(variance);
+}
+
+function findOutlierScores(values, mean, std) {
+  if (!Array.isArray(values) || values.length === 0 || std === null || std === undefined || Number.isNaN(std)) {
+    return [];
+  }
+  const upper = mean + std;
+  const lower = mean - std;
+  return values.filter(value => value !== null && value !== undefined && (value > upper || value < lower));
 }
 
 function getResponseGroupCount(data, prefix) {

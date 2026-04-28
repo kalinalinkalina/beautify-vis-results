@@ -109,9 +109,9 @@ const COMPARISON_CONFIG = {
 };
 
 const FEATURE_LABELS = {
-    "CamPos": "Camera Position",
-    "Smoothing": "Smoothing",
-    "Lighting": "Lighting",
+    "CamPos": "Camera Viewpoint",
+    "Smoothing": "Smoothing/Denoising",
+    "Lighting": "Lighting/Shadows",
     "Color": "Color Remapping",
     "Errors": "Removing Errors",
     "Details": "Enhancing Details",

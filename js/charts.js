@@ -247,6 +247,7 @@ function makeStackedBarChart(data, x, score, group, options, containerId) {
         responseScale = 'acceptability',
         traceNameMap = {},
         groupLabelMap = {},
+        hoverNameMap = {},
         groupHoverLabel = 'Group',
         xTickAngle = 30,
         showLegend = true
@@ -303,7 +304,7 @@ function makeStackedBarChart(data, x, score, group, options, containerId) {
         bottomTickText.push(getFeatureLabel(feature));
         groupOrder.forEach((groupName, groupIndex) => {
             xPositions.push(featureStart + (groupIndex * intraGroupStep));
-            groupLabels.push(groupLabelMap[groupName] || groupName);
+            groupLabels.push(groupLabelMap[groupName] || hoverNameMap[groupName] || traceNameMap[groupName] || groupName);
         });
     });
     const xMin = xPositions.length ? xPositions[0] - 0.5 : -0.5;
@@ -415,6 +416,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const showLegend = options.showLegend !== false;
     const safeMarkerSymbols = (typeof options.markerSymbols === 'object' && options.markerSymbols !== null) ? options.markerSymbols : {};
     const stdDevDict = options.stdDevDict || null;
+    const outlierDict = options.outlierDict || null;
     const forceAIStyle = options.forceAIStyle || false;
     const sharedLayout = options.sharedLayout || null;
     const traceNameMap = options.traceNameMap || {};
@@ -425,13 +427,15 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const yaxisTitle = options.yaxisTitle || '';
     const xTickAngle = options.xTickAngle ?? 30;
     const responseScale = options.responseScale || 'acceptability';
+    const subtitle = options.subtitle || '';
     const meanLabel = getResponseMetricLabel(responseScale, 'Mean');
     featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
+
     function colorToRgba(color, alpha) {
         if (!color) {
             return `rgba(153, 153, 153, ${alpha})`;
         }
-        if (color.startsWith('rgba')) {
+        if (typeof color === 'string' && color.startsWith('rgba')) {
             return color;
         }
         try {
@@ -442,12 +446,28 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 return hexToRgba(computed, alpha);
             }
             if (computed.startsWith('rgb')) {
-                const rgba = computed.replace(/rgba?\(([^)]+)\)/, `rgba($1, ${alpha})`);
-                return rgba;
+                return computed.replace(/rgba?\(([^)]+)\)/, `rgba($1, ${alpha})`);
             }
         } catch (err) {
+            // fall back to gray on unsupported colors
         }
         return `rgba(153, 153, 153, ${alpha})`;
+    }
+
+    const featureOutlierCounts = {};
+    if (outlierDict && typeof outlierDict === 'object') {
+        Object.keys(outlierDict).forEach(groupKey => {
+            const groupValues = outlierDict[groupKey] || {};
+            featureOrder.forEach(feature => {
+                const scores = Array.isArray(groupValues[feature]) ? groupValues[feature] : [];
+                if (!featureOutlierCounts[feature]) featureOutlierCounts[feature] = {};
+                scores.forEach(score => {
+                    if (score === null || score === undefined || Number.isNaN(score)) return;
+                    if (!featureOutlierCounts[feature][score]) featureOutlierCounts[feature][score] = {};
+                    featureOutlierCounts[feature][score][groupKey] = (featureOutlierCounts[feature][score][groupKey] || 0) + 1;
+                });
+            });
+        });
     }
 
     const safeGroupOrder = Array.isArray(groupOrder) ? groupOrder : (groupOrder && typeof groupOrder === 'object' ? Object.values(groupOrder) : []);
@@ -583,6 +603,52 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                 : `<b>%{customdata[0]}</b><br>${meanLabel}: %{y:.2f}<br>%{customdata[2]}<extra></extra>`
         };
         lineTraces.push(lineTrace);
+
+        if (outlierDict && outlierDict[group]) {
+            const outlierValuesByFeature = outlierDict[group];
+            const outlierX = [];
+            const outlierY = [];
+            const outlierCustomData = [];
+            featureOrder.forEach(feature => {
+                const scores = outlierValuesByFeature[feature];
+                if (!Array.isArray(scores) || scores.length === 0) return;
+                scores.forEach(score => {
+                    if (score === null || score === undefined || Number.isNaN(score)) return;
+                    outlierX.push(feature);
+                    outlierY.push(score);
+                    const counts = featureOutlierCounts[feature]?.[score] || {};
+                    const getHoverName = name => hoverNameMap[name] || name;
+                    const countsText = Object.entries(counts)
+                        .map(([groupName, count]) => `${getHoverName(groupName)}: ${count}`)
+                        .join('<br>');
+                    outlierCustomData.push([getFeatureLabel(feature), hoverName, countsText]);
+                });
+            });
+            if (outlierX.length > 0) {
+                const outlierTrace = {
+                    x: outlierX,
+                    y: outlierY,
+                    customdata: outlierCustomData,
+                    type: 'scatter',
+                    mode: 'markers',
+                    name: traceNameMap[group] || group,
+                    showlegend: false,
+                    legendgroup: group,
+                    marker: {
+                        size: 8,
+                        symbol: 'circle',
+                        color: colorToRgba(legendColors[group] || '#999', 0.10),
+                        line: { width: 0 },
+                        opacity: 0.85
+                    },
+                    hovertemplate: `<b>Outliers</b><br>%{customdata[2]}<extra></extra>`,
+                    connectgaps: true,
+                    layer: 'above',
+                    isConfidenceBand: false
+                };
+                lineTraces.push(outlierTrace);
+            }
+        }
     });
 
     const traces = [...bandTraces, ...lineTraces];
@@ -595,8 +661,11 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
 
     let layout;
     if (sharedLayout) {
+        const titleConfig = subtitle
+            ? { text: title ? `${title}<br><span style="font-size:0.85em;color:#444">${subtitle}</span>` : `<span style="font-size:0.85em;color:#444">${subtitle}</span>` }
+            : title;
         layout = Object.assign({}, sharedLayout, {
-            title,
+            title: titleConfig,
             showlegend: showLegend,
             legend: Object.assign({}, sharedLayout.legend || {}, getPlotlyLegendConfig({ title: { text: legendTitle } }))
         });
@@ -606,6 +675,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
         const { tickvals: yTickVals, ticktext: yTickText, range: yRange, title: defaultYTitle } = window.getLikertYAxisTicks(responseScale);
         layout = buildDefaultPlotLayout({
             title,
+            subtitle,
             xaxis: buildXAxisConfig(xaxisTitle, xTickVals, xTickText, xTickAngle, 'category'),
             yaxis: buildYAxisConfig(yaxisTitle || defaultYTitle, yTickVals, yTickText),
             legendOptions: { title: { text: legendTitle } },
@@ -635,6 +705,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     const hoverNameMap = options.hoverNameMap || {};
     const hoverLabel = options.hoverLabel || legendTitle || 'Group';
     const pairedData = options.pairedData || [];
+    const subtitle = options.subtitle || '';
     const meanLabel = 'Mean Acceptability';
 
     const traces = [];
@@ -780,6 +851,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
 
     const layout = buildDefaultPlotLayout({
         title,
+        subtitle,
         xaxis: buildXAxisConfig('Type of Alteration', featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
         yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
         legendOptions: { title: { text: legendTitle } },
@@ -905,9 +977,17 @@ function hexToRgba(hex, alpha) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function buildDefaultPlotLayout({ title = '', xaxis = {}, yaxis = {}, legendOptions = {}, showLegend = true, height = 500, margin = { r: 180 }, hovermode = 'closest' } = {}) {
+function buildDefaultPlotLayout({ title = '', subtitle = '', xaxis = {}, yaxis = {}, legendOptions = {}, showLegend = true, height = 500, margin = { r: 180 }, hovermode = 'closest' } = {}) {
+    let titleConfig = title;
+    if (subtitle) {
+        const titleText = title
+            ? `${title}<br><span style="font-size:0.85em;color:#444">${subtitle}</span>`
+            : `<span style="font-size:0.85em;color:#444">${subtitle}</span>`;
+        titleConfig = { text: titleText };
+    }
+
     return {
-        title,
+        title: titleConfig,
         xaxis,
         yaxis,
         showlegend: showLegend,

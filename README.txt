@@ -1,0 +1,1 @@
+Open index.html in a browser, or visit https://kalinalinkalina.github.io/beautify-vis-results, to view the dashboard

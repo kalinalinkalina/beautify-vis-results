@@ -404,6 +404,7 @@ document.addEventListener('DOMContentLoaded', function() {
             rawGroups.forEach(rawGroup => {
                 const shortName = labelMap[rawGroup] || rawGroup;
                 displayNameMap[rawGroup] = shortName;
+                displayNameMap[shortName] = shortName;
                 if (meta.colorMap[shortName]) {
                     colorMap[rawGroup] = meta.colorMap[shortName];
                 }
@@ -415,7 +416,9 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             colorMap = meta.colorMap || generateColorScale(rawGroups);
             rawGroups.forEach(rawGroup => {
-                displayNameMap[rawGroup] = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
+                const displayName = labelMap ? (labelMap[rawGroup] || rawGroup) : rawGroup;
+                displayNameMap[rawGroup] = displayName;
+                displayNameMap[displayName] = displayName;
             });
         }
         let groupOrder = rawGroups.slice();
@@ -540,10 +543,10 @@ document.addEventListener('DOMContentLoaded', function() {
             acceptabilityHumanByComparison: `Acceptability: Human Alterations by ${comparisonLabel}`,
             acceptabilityAIByComparison: `Acceptability: AI Alterations by ${comparisonLabel}`,
             meanHumanVsAI: 'Mean Acceptability: Human vs AI',
-            meanSummary: 'Mean Acceptability Summary',
+            meanSummary: 'Mean Acceptability: Summary',
             meanHuman: 'Mean Acceptability: Human Alterations',
             meanAI: 'Mean Acceptability: AI Alterations',
-            meanByComparison: `Mean Acceptability by ${comparisonLabel}`,
+            meanByComparison: `Mean Acceptability: by ${comparisonLabel}`,
             distributionHumanVsAI: 'Acceptability Distribution: Human vs AI Alterations',
             distributionSummary: 'Acceptability Distribution',
             distributionHumanByComparison: `Acceptability Distribution: Human Alterations by ${comparisonLabel}`,
@@ -807,6 +810,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 ['Human', 'AI'],
                 {
                     title: getAlterationPlotTitle('meanHumanVsAI'),
+                    subtitle: 'Gray lines show individual responses',
                     legendTitle,
                     hoverLabel: 'Type',
                     hoverNameMap: { Human: 'Human', AI: 'AI' },
@@ -833,10 +837,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 [summary.traceName],
                 {
                     title: getAlterationPlotTitle('meanSummary'),
+                    subtitle: 'with ± 1 SD bands and outliers',
                     legendTitle: 'Summary',
                     traceNameMap: { [summary.groupName]: summary.traceName },
                     groupOrder: [summary.groupName],
                     stdDevDict: { [summary.groupName]: summary.stds },
+                    outlierDict: { [summary.groupName]: backendData.outliers?.[summary.groupName] || {} },
                     showLegend: false
                 },
                 'human-plot'
@@ -900,12 +906,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 [traceNameMap.Human, traceNameMap.AI],
                 {
                     title: getAlterationPlotTitle('meanHumanVsAI'),
+                    subtitle: 'with ± 1 SD bands and outliers',
                     legendTitle,
                     traceNameMap: traceNameMap,
                     hoverLabel: 'Type',
                     hoverNameMap: { Human: 'Human', AI: 'AI' },
                     groupOrder: ['Human', 'AI'],
-                    stdDevDict: { Human: humanStds, AI: aiStds }
+                    stdDevDict: { Human: humanStds, AI: aiStds },
+                    outlierDict: backendData.outliers || {}
                 },
                 'human-plot'
             );
@@ -926,10 +934,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 [summary.traceName],
                 {
                     title: getAlterationPlotTitle('meanSummary'),
+                    subtitle: 'with ± 1 SD bands and outliers',
                     legendTitle: 'Summary',
                     traceNameMap: { [summary.groupName]: summary.traceName },
                     groupOrder: [summary.groupName],
                     stdDevDict: { [summary.groupName]: summary.stds },
+                    outlierDict: { [summary.groupName]: backendData.outliers?.[summary.groupName] || {} },
                     showLegend: false
                 },
                 'human-plot'
@@ -959,14 +969,16 @@ document.addEventListener('DOMContentLoaded', function() {
             legendOrder,
                 {
                     title: getAlterationPlotTitle('meanHuman'),
+                    subtitle: 'with ± 1 SD bands and outliers',
                     legendTitle,
                     traceNameMap: traceNameMap,
                     hoverLabel: legendTitle,
                     hoverNameMap: displayNameMap,
                     groupOrder: groupOrder,
                     isGrouped: true,
-                stdDevDict: groupStdsHuman
-            },
+                    stdDevDict: groupStdsHuman,
+                    outlierDict: backendData.outliersHuman || {}
+                },
             'human-plot'
         );
         makeLineChart(
@@ -976,14 +988,16 @@ document.addEventListener('DOMContentLoaded', function() {
             legendOrder,
                 {
                     title: getAlterationPlotTitle('meanAI'),
+                    subtitle: 'with ± 1 SD bands and outliers',
                     legendTitle,
                     forceAIStyle: true,
                     traceNameMap: traceNameMap,
                     hoverLabel: legendTitle,
                     hoverNameMap: displayNameMap,
                     groupOrder: groupOrder,
-                stdDevDict: groupStdsAI
-            },
+                    stdDevDict: groupStdsAI,
+                    outlierDict: backendData.outliersAI || {}
+                },
             'ai-plot'
         );
         document.getElementById('human-plot').style.display = 'block';
@@ -1295,6 +1309,23 @@ document.addEventListener('DOMContentLoaded', function() {
         container.innerHTML = `<div style="color:red;text-align:center;padding:2em;">${message}</div>`;
     }
 
+    function clearPlotContainers() {
+        const humanPlot = document.getElementById('human-plot');
+        const aiPlot = document.getElementById('ai-plot');
+        const contextsContainer = document.getElementById('contexts-plots-container');
+        if (humanPlot) {
+            humanPlot.innerHTML = '';
+            humanPlot.style.display = 'none';
+        }
+        if (aiPlot) {
+            aiPlot.innerHTML = '';
+            aiPlot.style.display = 'none';
+        }
+        if (contextsContainer) {
+            contextsContainer.innerHTML = '';
+        }
+    }
+
     function renderStackedEmptyState(message, plotId) {
         const plot = document.getElementById(plotId);
         if (!plot) return;
@@ -1414,12 +1445,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     legendOrder,
                     {
                         title: getCombinedContextPlotTitle(viewConfig),
+                        subtitle: 'with ± 1 SD bands and outliers',
                         legendTitle,
                         traceNameMap: groupPresentation.traceNameMap,
                         hoverLabel: legendTitle,
                         hoverNameMap: groupPresentation.displayNameMap,
                         groupOrder: groupPresentation.groupOrder,
                         stdDevDict: stds,
+                        outlierDict: backendData.outliers || {},
                         xaxisTitle: '',
                         yaxisTitle: '',
                         xTickAngle: 15,
@@ -1444,12 +1477,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     legendOrder,
                     {
                         title: getContextPlotTitle(feature, viewConfig),
+                        subtitle: 'with ± 1 SD bands and outliers',
                         legendTitle,
                         traceNameMap: groupPresentation.traceNameMap,
                         hoverLabel: legendTitle,
                         hoverNameMap: groupPresentation.displayNameMap,
                         groupOrder: groupPresentation.groupOrder,
                         stdDevDict: stds,
+                        outlierDict: backendData.outliers || {},
                         xaxisTitle: '',
                         yaxisTitle: '',
                         xTickAngle: 15,
@@ -1717,7 +1752,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const selectedSortOption = sortBySelect.querySelector(`option[value="${sortBySelect.value}"]`);
         if (selectedSortOption && selectedSortOption.disabled) {
-            sortBySelect.value = 'mean';
+            const preferredSortOption = sortBySelect.querySelector('option[value="human_mean"]');
+            sortBySelect.value = preferredSortOption ? 'human_mean' : 'mean';
         }
     }
 
@@ -1771,7 +1807,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderBoxPlot(backendData, comparisonType, sortBy);
             } else if (chartType === 'stacked') {
                 renderStackedBarChart(backendData, comparisonType, sortBy);
-            } else if (chartType === 'slope') {
+            } else if ( chartType === 'slope') {
                 renderSlopeChart(backendData, comparisonType, sortBy);
             } else if (chartType === 'line') {
                 renderLineChart(backendData, comparisonType, sortBy);
@@ -1783,7 +1819,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('ai-plot').style.display = 'none';
             }
             resizeVisiblePlots();
-        } catch (err) {
+        } catch ( err) {
             document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">Error updating plots: ${err.message}</div>`;
             document.getElementById('human-plot').style.display = 'block';
             document.getElementById('ai-plot').style.display = 'none';
@@ -1793,6 +1829,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Fetch aggregated data from backend ---
     async function refreshBackendData() {
         const { chartType, comparisonType, contextView } = getSelections();
+        clearPlotContainers();
         showSpinner();
         try {
             if (isContextsTab()) {

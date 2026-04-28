@@ -1,6 +1,6 @@
 // Backend fetch and response normalization for aggregated chart data
 
-const BACKEND_API_URL = 'https://script.google.com/macros/s/AKfycbwGAibcEAKzTwJ0lK6Kj6gaOA3Q2RU8cFMM-F37yrjijlizPQl37QtjNa-WH4kKQLbj/exec';
+const BACKEND_API_URL = 'https://script.google.com/macros/s/AKfycbwUz6UJ2ttfgariQSMfu3Oh-2yn-fNThn9agcvb2EINHKFCQSCW5NiZbcyXmEQePuU/exec';
 
 function normalizeBackendData(rawData) {
     if (!rawData || typeof rawData !== 'object') rawData = {};
@@ -16,6 +16,9 @@ function normalizeBackendData(rawData) {
         meansAI: rawData.meansAI || {},
         stdsHuman: rawData.stdsHuman || {},
         stdsAI: rawData.stdsAI || {},
+        outliers: rawData.outliers || {},
+        outliersHuman: rawData.outliersHuman || {},
+        outliersAI: rawData.outliersAI || {},
         groupCounts: rawData.groupCounts || {},
         pairedData: Array.isArray(rawData.pairedData) ? rawData.pairedData : [],
         humanGroups: Array.isArray(rawData.humanGroups) ? rawData.humanGroups : null,
