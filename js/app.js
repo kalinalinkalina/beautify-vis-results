@@ -837,13 +837,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 [summary.traceName],
                 {
                     title: getAlterationPlotTitle('meanSummary'),
-                    subtitle: 'with ± 1 SD bands and outliers',
+                    subtitle: 'with ± 1 SD bands',
                     legendTitle: 'Summary',
                     traceNameMap: { [summary.groupName]: summary.traceName },
                     groupOrder: [summary.groupName],
                     stdDevDict: { [summary.groupName]: summary.stds },
                     outlierDict: { [summary.groupName]: backendData.outliers?.[summary.groupName] || {} },
-                    showLegend: false
+                    showLegend: false,
+                    allowSingleVisibleOutliers: false
                 },
                 'human-plot'
             );
@@ -906,7 +907,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 [traceNameMap.Human, traceNameMap.AI],
                 {
                     title: getAlterationPlotTitle('meanHumanVsAI'),
-                    subtitle: 'with ± 1 SD bands and outliers',
+                    subtitle: 'with ± 1 SD bands',
                     legendTitle,
                     traceNameMap: traceNameMap,
                     hoverLabel: 'Type',
@@ -934,13 +935,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 [summary.traceName],
                 {
                     title: getAlterationPlotTitle('meanSummary'),
-                    subtitle: 'with ± 1 SD bands and outliers',
+                    subtitle: 'with ± 1 SD bands',
                     legendTitle: 'Summary',
                     traceNameMap: { [summary.groupName]: summary.traceName },
                     groupOrder: [summary.groupName],
                     stdDevDict: { [summary.groupName]: summary.stds },
                     outlierDict: { [summary.groupName]: backendData.outliers?.[summary.groupName] || {} },
-                    showLegend: false
+                    showLegend: false,
+                    allowSingleVisibleOutliers: false
                 },
                 'human-plot'
             );
@@ -969,7 +971,7 @@ document.addEventListener('DOMContentLoaded', function() {
             legendOrder,
                 {
                     title: getAlterationPlotTitle('meanHuman'),
-                    subtitle: 'with ± 1 SD bands and outliers',
+                    subtitle: 'with ± 1 SD bands',
                     legendTitle,
                     traceNameMap: traceNameMap,
                     hoverLabel: legendTitle,
@@ -988,7 +990,7 @@ document.addEventListener('DOMContentLoaded', function() {
             legendOrder,
                 {
                     title: getAlterationPlotTitle('meanAI'),
-                    subtitle: 'with ± 1 SD bands and outliers',
+                    subtitle: 'with ± 1 SD bands',
                     legendTitle,
                     forceAIStyle: true,
                     traceNameMap: traceNameMap,
@@ -1309,6 +1311,19 @@ document.addEventListener('DOMContentLoaded', function() {
         container.innerHTML = `<div style="color:red;text-align:center;padding:2em;">${message}</div>`;
     }
 
+    function getFriendlyBackendErrorMessage(err) {
+        const rawMessage = err && err.message ? err.message : String(err || '');
+        const normalizedMessage = rawMessage.toLowerCase();
+        if (
+            normalizedMessage.includes('jsonp request timed out') ||
+            normalizedMessage.includes('server timed out') ||
+            normalizedMessage.includes('timeout')
+        ) {
+            return 'The server timed out. It happens sometimes! Sorry, please try again.';
+        }
+        return `Error fetching data: ${rawMessage}`;
+    }
+
     function clearPlotContainers() {
         const humanPlot = document.getElementById('human-plot');
         const aiPlot = document.getElementById('ai-plot');
@@ -1445,7 +1460,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     legendOrder,
                     {
                         title: getCombinedContextPlotTitle(viewConfig),
-                        subtitle: 'with ± 1 SD bands and outliers',
+                        subtitle: 'with ± 1 SD bands',
                         legendTitle,
                         traceNameMap: groupPresentation.traceNameMap,
                         hoverLabel: legendTitle,
@@ -1457,7 +1472,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         yaxisTitle: '',
                         xTickAngle: 15,
                         responseScale: viewConfig.responseScale,
-                        showLegend: !isSummary
+                        showLegend: !isSummary,
+                        allowSingleVisibleOutliers: !isSummary
                     },
                     plotId
                 );
@@ -1477,7 +1493,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     legendOrder,
                     {
                         title: getContextPlotTitle(feature, viewConfig),
-                        subtitle: 'with ± 1 SD bands and outliers',
+                        subtitle: 'with ± 1 SD bands',
                         legendTitle,
                         traceNameMap: groupPresentation.traceNameMap,
                         hoverLabel: legendTitle,
@@ -1489,7 +1505,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         yaxisTitle: '',
                         xTickAngle: 15,
                         responseScale: viewConfig.responseScale,
-                        showLegend: !isSummary && featureIndex === 0
+                        showLegend: !isSummary && featureIndex === 0,
+                        allowSingleVisibleOutliers: !isSummary
                     },
                     plotId
                 );
@@ -1856,10 +1873,11 @@ document.addEventListener('DOMContentLoaded', function() {
             syncStackedFilterState(getAvailableStackedGroups(), activeTab, comparisonType);
             updatePlots();
         } catch (err) {
+            const errorMessage = getFriendlyBackendErrorMessage(err);
             if (isContextsTab()) {
-                renderContextError(`Error fetching data: ${err.message}`);
+                renderContextError(errorMessage);
             } else {
-                document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">Error fetching data: ${err.message}</div>`;
+                document.getElementById('human-plot').innerHTML = `<div style="color:red;text-align:center;padding:2em;">${errorMessage}</div>`;
                 document.getElementById('human-plot').style.display = 'block';
                 document.getElementById('ai-plot').style.display = 'none';
             }

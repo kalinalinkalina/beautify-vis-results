@@ -62,6 +62,236 @@ function getResponseMetricLabel(scaleKey = 'acceptability', prefix = '') {
     return prefix ? `${prefix} ${baseLabel}` : baseLabel;
 }
 
+function buildLineChartTitleConfig(title, subtitle, showOutliers) {
+    const outlierSubtitle = buildLineChartSubtitleText(subtitle, showOutliers);
+    if (outlierSubtitle) {
+        return {
+            text: title
+                ? `${title}<br><span style="font-size:0.85em;color:#444">${outlierSubtitle}</span>`
+                : `<span style="font-size:0.85em;color:#444">${outlierSubtitle}</span>`
+        };
+    }
+    return title;
+}
+
+function buildLineChartSubtitleText(subtitle, showOutliers) {
+    return showOutliers && subtitle ? `${subtitle} and outliers` : subtitle;
+}
+
+function isTraceVisible(trace) {
+    return !!trace && trace.visible !== false && trace.visible !== 'legendonly';
+}
+
+function hasDrawableLineValues(trace) {
+    if (!trace || !Array.isArray(trace.y)) return false;
+    return trace.y.some(value => value !== null && value !== undefined && !Number.isNaN(value));
+}
+
+function queueLineChartOutlierSync(plotContainer) {
+    if (!plotContainer || plotContainer._queuedLineChartOutlierSync) return;
+    plotContainer._queuedLineChartOutlierSync = true;
+    setTimeout(() => {
+        plotContainer._queuedLineChartOutlierSync = false;
+        syncLineChartOutlierVisibility(plotContainer);
+    }, 0);
+}
+
+function getLineChartAllGroups(plotContainer) {
+    const traceRoles = Array.isArray(plotContainer?._lineChartTraceRoles) ? plotContainer._lineChartTraceRoles : [];
+    return Array.from(new Set(
+        traceRoles
+            .filter(roleInfo => roleInfo?.role === 'main' && roleInfo.groupKey)
+            .map(roleInfo => roleInfo.groupKey)
+    ));
+}
+
+function getLineChartVisibleLegendGroups(plotContainer) {
+    const traces = Array.isArray(plotContainer?.data) ? plotContainer.data : [];
+    const traceRoles = Array.isArray(plotContainer?._lineChartTraceRoles) ? plotContainer._lineChartTraceRoles : [];
+    const visibleGroups = [];
+
+    traceRoles.forEach((roleInfo, index) => {
+        if (!roleInfo || roleInfo.role !== 'main') return;
+        const trace = traces[index];
+        if (!trace || !isTraceVisible(trace) || !hasDrawableLineValues(trace)) return;
+        visibleGroups.push(roleInfo.groupKey);
+    });
+
+    return visibleGroups;
+}
+
+function applyLineChartVisibilityState(plotContainer, visibleGroups) {
+    if (!plotContainer) return Promise.resolve();
+    const traces = Array.isArray(plotContainer.data) ? plotContainer.data : [];
+    const traceRoles = Array.isArray(plotContainer._lineChartTraceRoles) ? plotContainer._lineChartTraceRoles : [];
+    const visibleSet = new Set(Array.isArray(visibleGroups) ? visibleGroups : []);
+    const activeOutlierGroup = visibleSet.size === 1 ? Array.from(visibleSet)[0] : null;
+    const updateIndices = [];
+    const updateValues = [];
+
+    traces.forEach((trace, index) => {
+        const roleInfo = traceRoles[index] || {};
+        const groupKey = roleInfo.groupKey || trace?.legendgroup;
+        if (!groupKey) return;
+
+        if (roleInfo.role === 'main') {
+            updateIndices.push(index);
+            updateValues.push(visibleSet.has(groupKey) ? true : 'legendonly');
+            return;
+        }
+
+        if (roleInfo.role === 'outlier') {
+            updateIndices.push(index);
+            updateValues.push(activeOutlierGroup === groupKey);
+            return;
+        }
+
+        if (trace.legendgroup === groupKey) {
+            updateIndices.push(index);
+            updateValues.push(visibleSet.has(groupKey));
+        }
+    });
+
+    if (updateIndices.length === 0) return Promise.resolve();
+    return Plotly.restyle(plotContainer, { visible: updateValues }, updateIndices);
+}
+
+function handleLineChartLegendInteraction(plotContainer, eventData, isolateGroup) {
+    if (!plotContainer || !eventData) return false;
+    const traces = Array.isArray(plotContainer.data) ? plotContainer.data : [];
+    const traceRoles = Array.isArray(plotContainer._lineChartTraceRoles) ? plotContainer._lineChartTraceRoles : [];
+    const clickedTrace = traces[eventData.curveNumber];
+    const clickedRole = traceRoles[eventData.curveNumber] || {};
+    const targetGroup = clickedRole.groupKey || clickedTrace?.legendgroup;
+    if (!targetGroup) return false;
+
+    const allGroups = getLineChartAllGroups(plotContainer);
+    const visibleGroups = getLineChartVisibleLegendGroups(plotContainer);
+    let nextVisibleGroups = visibleGroups.slice();
+
+    if (isolateGroup) {
+        const shouldRestoreAll = visibleGroups.length === 1 && visibleGroups[0] === targetGroup;
+        nextVisibleGroups = shouldRestoreAll ? allGroups : [targetGroup];
+    } else {
+        const targetIsVisible = visibleGroups.includes(targetGroup);
+        if (targetIsVisible && visibleGroups.length === 1) {
+            return false;
+        }
+        nextVisibleGroups = targetIsVisible
+            ? visibleGroups.filter(groupKey => groupKey !== targetGroup)
+            : [...visibleGroups, targetGroup];
+    }
+
+    plotContainer._syncingLineChartOutliers = true;
+    applyLineChartVisibilityState(plotContainer, nextVisibleGroups)
+        .catch(() => {})
+        .finally(() => {
+            plotContainer._syncingLineChartOutliers = false;
+        });
+    return false;
+}
+
+function storeLineChartTraceRoles(plotContainer, traces) {
+    if (!plotContainer) return;
+    plotContainer._lineChartTraceRoles = (Array.isArray(traces) ? traces : []).map(trace => ({
+        role: trace?._lineChartRole || null,
+        groupKey: trace?._lineChartGroupKey || null
+    }));
+}
+
+function applyInitialLineChartOutlierVisibility(traces) {
+    if (!Array.isArray(traces) || traces.length === 0) return traces;
+    const allowSingleVisibleOutliers = traces.some(trace => trace?._lineChartAllowSingleVisibleOutliers === false) ? false : true;
+
+    const visibleMainGroups = traces
+        .filter(trace => trace?._lineChartRole === 'main' && hasDrawableLineValues(trace))
+        .map(trace => trace._lineChartGroupKey);
+    const activeGroup = allowSingleVisibleOutliers && visibleMainGroups.length === 1 ? visibleMainGroups[0] : null;
+
+    traces.forEach(trace => {
+        if (trace?._lineChartRole !== 'outlier') return;
+        trace.visible = trace._lineChartGroupKey === activeGroup;
+    });
+
+    return traces;
+}
+
+function syncLineChartOutlierVisibility(plotContainer) {
+    if (!plotContainer || plotContainer._syncingLineChartOutliers) return;
+    const traces = Array.isArray(plotContainer.data) ? plotContainer.data : [];
+    const traceRoles = Array.isArray(plotContainer._lineChartTraceRoles) ? plotContainer._lineChartTraceRoles : [];
+    const outlierTraceIndices = [];
+    const outlierVisibility = [];
+    const visibleGroups = getLineChartVisibleLegendGroups(plotContainer);
+    const shouldShowOutliers = plotContainer._lineChartAllowSingleVisibleOutliers !== false && visibleGroups.length === 1;
+    const activeGroup = shouldShowOutliers ? visibleGroups[0] : null;
+
+    traceRoles.forEach((roleInfo, index) => {
+        if (!roleInfo || roleInfo.role !== 'outlier') return;
+        const shouldBeVisible = shouldShowOutliers && roleInfo.groupKey === activeGroup;
+        outlierTraceIndices.push(index);
+        outlierVisibility.push(shouldBeVisible);
+    });
+
+    if (outlierTraceIndices.length === 0) return;
+    const currentOutlierVisibility = outlierTraceIndices.map(index => {
+        const trace = traces[index];
+        return isTraceVisible(trace);
+    });
+    const matchesCurrentState = currentOutlierVisibility.length === outlierVisibility.length
+        && currentOutlierVisibility.every((value, index) => value === outlierVisibility[index]);
+    const subtitleNeedsUpdate = plotContainer._lineChartOutliersShown !== shouldShowOutliers;
+    if (matchesCurrentState && !subtitleNeedsUpdate) return;
+
+    plotContainer._syncingLineChartOutliers = true;
+    const updatePromises = [];
+    if (!matchesCurrentState) {
+        updatePromises.push(Plotly.restyle(plotContainer, { visible: outlierVisibility }, outlierTraceIndices));
+    }
+    if (subtitleNeedsUpdate) {
+        plotContainer._lineChartOutliersShown = shouldShowOutliers;
+        updatePromises.push(Plotly.relayout(
+            plotContainer,
+            'title',
+            buildLineChartTitleConfig(
+                plotContainer._lineChartTitle || '',
+                plotContainer._lineChartSubtitle || '',
+                shouldShowOutliers
+            )
+        ));
+    }
+    Promise.all(updatePromises)
+        .catch(() => {})
+        .finally(() => {
+            plotContainer._syncingLineChartOutliers = false;
+        });
+}
+
+function attachLineChartOutlierLegendBehavior(plotContainer) {
+    if (!plotContainer || typeof plotContainer.on !== 'function') return;
+    if (plotContainer._hasLineChartOutlierLegendBehavior) {
+        syncLineChartOutlierVisibility(plotContainer);
+        return;
+    }
+
+    plotContainer._hasLineChartOutlierLegendBehavior = true;
+
+    plotContainer.on('plotly_legendclick', eventData => {
+        return handleLineChartLegendInteraction(plotContainer, eventData, false);
+    });
+    plotContainer.on('plotly_legenddoubleclick', eventData => {
+        return handleLineChartLegendInteraction(plotContainer, eventData, true);
+    });
+    plotContainer.on('plotly_restyle', () => {
+        queueLineChartOutlierSync(plotContainer);
+    });
+    plotContainer.on('plotly_afterplot', () => {
+        queueLineChartOutlierSync(plotContainer);
+    });
+
+    syncLineChartOutlierVisibility(plotContainer);
+}
+
 function buildYAxisConfig(title, yTickVals, yTickText, anchorToX = false) {
     const config = {
         title,
@@ -234,7 +464,128 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
     if (filteredTraces.length === 0) return;
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    const plotResult = Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    if (plotResult && typeof plotResult.then === 'function') {
+        plotResult.then(() => attachXAxisLabelGifHover(plotContainer));
+    } else {
+        attachXAxisLabelGifHover(plotContainer);
+    }
+}
+
+function ensureXAxisLabelGifPopup(plotContainer) {
+    if (!plotContainer) return null;
+    let popup = plotContainer.querySelector('.x-axis-label-gif-popup');
+    if (!popup) {
+        popup = document.createElement('div');
+        popup.className = 'x-axis-label-gif-popup';
+        popup.innerHTML = `
+            <div class="x-axis-label-gif-card">
+                <div class="x-axis-label-gif-image"></div>
+                <div class="x-axis-label-gif-text"></div>
+            </div>
+        `;
+        plotContainer.style.position = plotContainer.style.position || 'relative';
+        plotContainer.appendChild(popup);
+    }
+    return popup;
+}
+
+function getXAxisLabelGifData(label) {
+    const featureLabels = window.FEATURE_LABELS || {};
+    const normalizedLabel = String(label || '').trim();
+    const reverseMap = Object.entries(featureLabels).reduce((map, [key, value]) => {
+        map[value] = key;
+        map[key] = key;
+        return map;
+    }, {});
+    const featureKey = reverseMap[normalizedLabel] || normalizedLabel;
+    const gifUrl = `gifs/${featureKey}.gif`;
+    const validFeatureKeys = new Set(Object.keys(featureLabels));
+
+    return {
+        url: validFeatureKeys.has(featureKey) ? gifUrl : null,
+        title: normalizedLabel || featureKey
+    };
+}
+
+function positionXAxisLabelGifPopup(plotContainer, popup, event) {
+    if (!plotContainer || !popup) return;
+    const rect = plotContainer.getBoundingClientRect();
+    const popupRect = popup.getBoundingClientRect();
+    let x = event.clientX - rect.left + 14;
+    let y = event.clientY - rect.top + 18;
+    if (x + popupRect.width > rect.width - 8) {
+        x = rect.width - popupRect.width - 8;
+    }
+    if (y + popupRect.height > rect.height - 8) {
+        y = Math.max(8, rect.height - popupRect.height - 8);
+    }
+    popup.style.left = `${x}px`;
+    popup.style.top = `${y}px`;
+}
+
+function showXAxisLabelGifPopup(plotContainer, text, event) {
+    const popup = ensureXAxisLabelGifPopup(plotContainer);
+    if (!popup) return;
+    const imageContainer = popup.querySelector('.x-axis-label-gif-image');
+    const textContainer = popup.querySelector('.x-axis-label-gif-text');
+    const { url, title } = getXAxisLabelGifData(text);
+
+    textContainer.textContent = title;
+    if (url) {
+        imageContainer.innerHTML = `<img src="${url}" alt="${title}" />`;
+    } else {
+        imageContainer.innerHTML = '<div class="x-axis-label-gif-placeholder"><div class="x-axis-label-gif-spinner"></div></div>';
+    }
+
+    popup.classList.add('visible');
+    positionXAxisLabelGifPopup(plotContainer, popup, event);
+}
+
+function hideXAxisLabelGifPopup(plotContainer) {
+    if (!plotContainer) return;
+    const popup = plotContainer.querySelector('.x-axis-label-gif-popup');
+    if (popup) {
+        popup.classList.remove('visible');
+    }
+}
+
+function attachXAxisLabelGifHover(plotContainer) {
+    if (!plotContainer) return;
+
+    if (typeof plotContainer.on === 'function' && !plotContainer.__xAxisGifHoverPlotlyListenerAttached) {
+        plotContainer.__xAxisGifHoverPlotlyListenerAttached = true;
+        plotContainer.on('plotly_afterplot', () => attachXAxisLabelGifHover(plotContainer));
+    }
+
+    const textElements = plotContainer.querySelectorAll('.xtick text, .xaxislayer-above .xtick text, .xaxislayer-below .xtick text, .annotation text');
+    if (textElements.length === 0) {
+        if (!plotContainer.__xAxisGifHoverRetryScheduled) {
+            plotContainer.__xAxisGifHoverRetryScheduled = true;
+            setTimeout(() => {
+                plotContainer.__xAxisGifHoverRetryScheduled = false;
+                attachXAxisLabelGifHover(plotContainer);
+            }, 100);
+        }
+        return;
+    }
+
+    textElements.forEach(textEl => {
+        if (textEl.__xAxisGifHoverAttached) return;
+        textEl.__xAxisGifHoverAttached = true;
+        const labelText = textEl.textContent.trim();
+        if (!labelText) return;
+
+        textEl.style.cursor = 'pointer';
+        textEl.style.pointerEvents = 'auto';
+        if (textEl.parentElement) {
+            textEl.parentElement.style.pointerEvents = 'auto';
+        }
+
+        textEl.addEventListener('mouseenter', event => showXAxisLabelGifPopup(plotContainer, labelText, event));
+        textEl.addEventListener('mousemove', event => positionXAxisLabelGifPopup(plotContainer, ensureXAxisLabelGifPopup(plotContainer), event));
+        textEl.addEventListener('mouseleave', () => hideXAxisLabelGifPopup(plotContainer));
+    });
 }
 
 function makeStackedBarChart(data, x, score, group, options, containerId) {
@@ -406,7 +757,12 @@ function makeStackedBarChart(data, x, score, group, options, containerId) {
     if (filteredTraces.length === 0) return;
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    const plotResult = Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    if (plotResult && typeof plotResult.then === 'function') {
+        plotResult.then(() => attachXAxisLabelGifHover(plotContainer));
+    } else {
+        attachXAxisLabelGifHover(plotContainer);
+    }
 }
 
 function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, options, containerId) {
@@ -423,12 +779,15 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const hoverNameMap = options.hoverNameMap || {};
     const hoverLabel = options.hoverLabel || legendTitle || 'Group';
     const groupOrder = options.groupOrder || legendOrder;
-    const xaxisTitle = options.xaxisTitle || 'Type of Alteration';
+    const alterationHoverHint = ' (hover over label to see image)';
+    const xaxisTitleBase = options.xaxisTitle || 'Type of Alteration';
+    const xaxisTitle = xaxisTitleBase.includes(alterationHoverHint) ? xaxisTitleBase : `${xaxisTitleBase}${alterationHoverHint}`;
     const yaxisTitle = options.yaxisTitle || '';
     const xTickAngle = options.xTickAngle ?? 30;
     const responseScale = options.responseScale || 'acceptability';
     const subtitle = options.subtitle || '';
     const meanLabel = getResponseMetricLabel(responseScale, 'Mean');
+    const allowSingleVisibleOutliers = options.allowSingleVisibleOutliers !== false;
     featureOrder = Array.isArray(featureOrder) ? featureOrder : (featureOrder && typeof featureOrder === 'object' ? Object.values(featureOrder) : [featureOrder]);
 
     function colorToRgba(color, alpha) {
@@ -596,6 +955,9 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
             connectgaps: true,
             showlegend: showLegend,
             legendgroup: group,
+            _lineChartRole: 'main',
+            _lineChartGroupKey: group,
+            _lineChartAllowSingleVisibleOutliers: allowSingleVisibleOutliers,
             layer: 'above',
             isConfidenceBand: false,
             hovertemplate: validGroupOrder.length > 1
@@ -633,7 +995,11 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
                     mode: 'markers',
                     name: traceNameMap[group] || group,
                     showlegend: false,
-                    legendgroup: group,
+                    legendgroup: `${group}__outliers`,
+                    visible: false,
+                    _lineChartRole: 'outlier',
+                    _lineChartGroupKey: group,
+                    _lineChartAllowSingleVisibleOutliers: allowSingleVisibleOutliers,
                     marker: {
                         size: 8,
                         symbol: 'circle',
@@ -658,12 +1024,13 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const lineTracesOnly = filteredTraces.filter(t => !t.isConfidenceBand);
     const sortedLineTraces = orderTracesByLegend(lineTracesOnly, legendOrder);
     filteredTraces = [...bandTracesOnly, ...sortedLineTraces];
+    applyInitialLineChartOutlierVisibility(filteredTraces);
+    const initialOutliersShown = allowSingleVisibleOutliers
+        && getLineChartVisibleLegendGroups({ data: filteredTraces, _lineChartTraceRoles: filteredTraces.map(trace => ({ role: trace?._lineChartRole || null, groupKey: trace?._lineChartGroupKey || null })) }).length === 1;
 
     let layout;
     if (sharedLayout) {
-        const titleConfig = subtitle
-            ? { text: title ? `${title}<br><span style="font-size:0.85em;color:#444">${subtitle}</span>` : `<span style="font-size:0.85em;color:#444">${subtitle}</span>` }
-            : title;
+        const titleConfig = buildLineChartTitleConfig(title, subtitle, initialOutliersShown);
         layout = Object.assign({}, sharedLayout, {
             title: titleConfig,
             showlegend: showLegend,
@@ -675,7 +1042,7 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
         const { tickvals: yTickVals, ticktext: yTickText, range: yRange, title: defaultYTitle } = window.getLikertYAxisTicks(responseScale);
         layout = buildDefaultPlotLayout({
             title,
-            subtitle,
+            subtitle: buildLineChartSubtitleText(subtitle, initialOutliersShown),
             xaxis: buildXAxisConfig(xaxisTitle, xTickVals, xTickText, xTickAngle, 'category'),
             yaxis: buildYAxisConfig(yaxisTitle || defaultYTitle, yTickVals, yTickText),
             legendOptions: { title: { text: legendTitle } },
@@ -689,7 +1056,22 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     }
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    plotContainer._hasLineChartOutlierLegendBehavior = false;
+    storeLineChartTraceRoles(plotContainer, filteredTraces);
+    plotContainer._lineChartAllowSingleVisibleOutliers = allowSingleVisibleOutliers;
+    plotContainer._lineChartTitle = title;
+    plotContainer._lineChartSubtitle = subtitle;
+    plotContainer._lineChartOutliersShown = initialOutliersShown;
+    const plotResult = Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    if (plotResult && typeof plotResult.then === 'function') {
+        plotResult.then(() => {
+            attachXAxisLabelGifHover(plotContainer);
+            attachLineChartOutlierLegendBehavior(plotContainer);
+        });
+    } else {
+        attachXAxisLabelGifHover(plotContainer);
+        attachLineChartOutlierLegendBehavior(plotContainer);
+    }
 }
 
 function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendColors, legendOrder, options, containerId) {
@@ -852,7 +1234,7 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     const layout = buildDefaultPlotLayout({
         title,
         subtitle,
-        xaxis: buildXAxisConfig('Type of Alteration', featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
+        xaxis: buildXAxisConfig('Type of Alteration (hover over label to see image)', featureOrder.map((_, i) => i), xTickText, 30, 'linear', [-0.5, featureOrder.length - 0.5]),
         yaxis: buildYAxisConfig('Acceptability', yTickVals, yTickText),
         legendOptions: { title: { text: legendTitle } },
         showLegend,
@@ -861,7 +1243,12 @@ function makeSlopeChart(meanScoresDict, meanScoresDictAI, featureOrder, legendCo
     const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    const plotResult = Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    if (plotResult && typeof plotResult.then === 'function') {
+        plotResult.then(() => attachXAxisLabelGifHover(plotContainer));
+    } else {
+        attachXAxisLabelGifHover(plotContainer);
+    }
 }
 
 function makeSwarmPlot(data, x, y, group, options, containerId) {
@@ -966,7 +1353,12 @@ function makeSwarmPlot(data, x, y, group, options, containerId) {
     const filteredTraces = orderTracesByLegend(window.filterValidTraces(traces), legendOrder);
     const plotContainer = resolvePlotContainer(containerId);
     if (!plotContainer) return;
-    Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    const plotResult = Plotly.newPlot(plotContainer, filteredTraces, layout, { responsive: true });
+    if (plotResult && typeof plotResult.then === 'function') {
+        plotResult.then(() => attachXAxisLabelGifHover(plotContainer));
+    } else {
+        attachXAxisLabelGifHover(plotContainer);
+    }
 }
 
 function hexToRgba(hex, alpha) {
@@ -1004,4 +1396,5 @@ if (typeof window !== 'undefined') {
     window.makeLineChart = makeLineChart;
     window.makeSlopeChart = makeSlopeChart;
     window.makeSwarmPlot = makeSwarmPlot;
+    window.attachXAxisLabelGifHover = attachXAxisLabelGifHover;
 }
