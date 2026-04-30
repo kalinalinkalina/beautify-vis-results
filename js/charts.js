@@ -307,9 +307,22 @@ function buildYAxisConfig(title, yTickVals, yTickText, anchorToX = false) {
     return config;
 }
 
+const ALTERATION_HOVER_HINT = ' (hover over label to see image)';
+
+function normalizeAlterationXAxisTitle(title = '') {
+    if (typeof title !== 'string') return title;
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle || !trimmedTitle.toLowerCase().includes('type of alteration')) {
+        return title;
+    }
+    return trimmedTitle.includes(ALTERATION_HOVER_HINT)
+        ? trimmedTitle
+        : `${trimmedTitle}${ALTERATION_HOVER_HINT}`;
+}
+
 function buildXAxisConfig(title, tickvals, ticktext, tickangle = 30, type = 'linear', range = null) {
     const config = {
-        title,
+        title: normalizeAlterationXAxisTitle(title),
         type,
         tickmode: 'array',
         tickvals,
@@ -434,7 +447,7 @@ function makeBoxPlot(data, x, y, color, options, containerId) {
     const layout = buildDefaultPlotLayout({
         title,
         xaxis: {
-            title: xaxisTitle,
+            title: normalizeAlterationXAxisTitle(xaxisTitle),
             tickangle: xTickAngle,
             tickvals: xTickVals,
             ticktext: xTickText,
@@ -779,9 +792,8 @@ function makeLineChart(meanScoresDict, featureOrder, legendColors, legendOrder, 
     const hoverNameMap = options.hoverNameMap || {};
     const hoverLabel = options.hoverLabel || legendTitle || 'Group';
     const groupOrder = options.groupOrder || legendOrder;
-    const alterationHoverHint = ' (hover over label to see image)';
     const xaxisTitleBase = options.xaxisTitle || 'Type of Alteration';
-    const xaxisTitle = xaxisTitleBase.includes(alterationHoverHint) ? xaxisTitleBase : `${xaxisTitleBase}${alterationHoverHint}`;
+    const xaxisTitle = normalizeAlterationXAxisTitle(xaxisTitleBase);
     const yaxisTitle = options.yaxisTitle || '';
     const xTickAngle = options.xTickAngle ?? 30;
     const responseScale = options.responseScale || 'acceptability';
